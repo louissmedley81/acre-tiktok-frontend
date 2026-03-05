@@ -575,12 +575,34 @@
           Continue with TikTok
         </button>
         
+        <pre id="me"></pre>
+
         <script>
           document.getElementById("tiktokLoginBtn").addEventListener("click", () => {
             // Your backend route that starts TikTok OAuth
             window.location.href = "https://acre-tiktok-backend-main.vercel.app/api/auth/tiktok";
           });
         </script>
+
+        <script>
+          async function loadTikTokMe() {
+            const r = await fetch("https://acre-tiktok-backend-main.vercel.app/api/tiktok-me", {
+            credentials: "include"
+          });
+  
+          const data = await r.json();
+  
+          document.getElementById("me").textContent =
+            JSON.stringify(data, null, 2);
+        }
+  
+        const tiktokParams = new URLSearchParams(window.location.search);
+  
+        if (tiktokParams.get("tiktok") === "connected") {
+          loadTikTokMe();
+        }
+      </script>
+
       </div>
     </div>
   </div>
