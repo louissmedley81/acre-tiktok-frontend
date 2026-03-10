@@ -610,11 +610,26 @@
 
       <pre id="xme" style="background:black;color:cyan;padding:20px;margin-top:12px;"></pre>
 
-      <button class="btn btn-outline" id="xLoginBtn" type="button">
-        Continue with X
-      </button>
+      <script>
+        document.getElementById("xLoginBtn").addEventListener("click", () => {
+          window.location.href = "https://YOUR-BACKEND-DOMAIN.vercel.app/api/auth/x";
+        });
       
-      <pre id="xme" style="background:black;color:cyan;padding:20px;margin-top:12px;"></pre>
+        async function loadXMe() {
+          const r = await fetch("https://YOUR-BACKEND-DOMAIN.vercel.app/api/auth/x-me", {
+            credentials: "include"
+          });
+      
+          const data = await r.json();
+          document.getElementById("xme").textContent = JSON.stringify(data, null, 2);
+        }
+      
+        const params = new URLSearchParams(window.location.search);
+      
+        if (params.get("x") === "connected") {
+          loadXMe();
+        }
+      </script>
 
       </div>
     </div>
