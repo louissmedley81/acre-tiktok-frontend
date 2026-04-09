@@ -1,9 +1,9 @@
-<test change>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="acre-backend-url" content="https://acre-tiktok-backend-main.vercel.app">
 <title>ACRE — Editor Experience Wireframes</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -578,58 +578,11 @@
         
         <pre id="me" style="background:black;color:lime;padding:20px;"></pre>
 
-        <script>
-          document.getElementById("tiktokLoginBtn").addEventListener("click", () => {
-            // Your backend route that starts TikTok OAuth
-            window.location.href = "https://acre-tiktok-backend-main.vercel.app/api/auth/tiktok";
-          });
-        </script>
-
-        <script>
-          async function loadTikTokMe() {
-            const r = await fetch("https://acre-tiktok-backend-main.vercel.app/api/tiktok-me", {
-            credentials: "include"
-          });
-  
-          const data = await r.json();
-  
-          document.getElementById("me").textContent =
-            JSON.stringify(data, null, 2);
-        }
-  
-        const tiktokParams = new URLSearchParams(window.location.search);
-  
-        if (tiktokParams.get("tiktok") === "connected") {
-          loadTikTokMe();
-        }
-      </script>
-
       <button class="btn btn-outline" id="xLoginBtn" type="button">
         Continue with X
       </button>
 
       <pre id="xme" style="background:black;color:cyan;padding:20px;margin-top:12px;"></pre>
-
-      <script>
-        document.getElementById("xLoginBtn").addEventListener("click", () => {
-          window.location.href = "https://acre-tiktok-backend-main.vercel.app/api/auth/x";
-        });
-      
-        async function loadXMe() {
-          const r = await fetch("https://acre-tiktok-backend-main.vercel.app/api/auth/x-me", {
-            credentials: "include"
-          });
-      
-          const data = await r.json();
-          document.getElementById("xme").textContent = JSON.stringify(data, null, 2);
-        }
-      
-        const params = new URLSearchParams(window.location.search);
-      
-        if (params.get("x") === "connected") {
-          loadXMe();
-        }
-      </script>
 
       </div>
     </div>
@@ -999,6 +952,58 @@
 </div>
 
 <script>
+const backendBaseUrl = (
+  document.querySelector('meta[name="acre-backend-url"]')?.content ||
+  "https://acre-tiktok-backend-main.vercel.app"
+).replace(/\/+$/, "");
+
+function backendUrl(path) {
+  return `${backendBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+async function loadConnectionDetails(endpoint, elementId, label) {
+  const output = document.getElementById(elementId);
+
+  try {
+    const response = await fetch(backendUrl(endpoint), {
+      credentials: "include",
+    });
+    const data = await response.json().catch(() => ({
+      error: `${label} returned a non-JSON response`,
+      status: response.status,
+    }));
+
+    output.textContent = JSON.stringify(data, null, 2);
+  } catch (error) {
+    output.textContent = JSON.stringify(
+      {
+        error: `Unable to load ${label}`,
+        detail: String(error),
+      },
+      null,
+      2
+    );
+  }
+}
+
+document.getElementById("tiktokLoginBtn").addEventListener("click", () => {
+  window.location.href = backendUrl("/api/auth/tiktok");
+});
+
+document.getElementById("xLoginBtn").addEventListener("click", () => {
+  window.location.href = backendUrl("/api/auth/x");
+});
+
+const params = new URLSearchParams(window.location.search);
+
+if (params.get("tiktok") === "connected") {
+  loadConnectionDetails("/api/tiktok-me", "me", "TikTok profile");
+}
+
+if (params.get("x") === "connected") {
+  loadConnectionDetails("/api/auth/x-me", "xme", "X profile");
+}
+
 function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tabs button').forEach(b => b.classList.remove('active'));
