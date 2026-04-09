@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
@@ -16,7 +16,15 @@ type Viewer = {
   id: string;
 } | null;
 
+type ProviderKey = "tiktok" | "x";
+
 type ConnectionState = {
+  profile?: {
+    handle?: string | null;
+    id?: string | null;
+    imageUrl?: string | null;
+    name?: string | null;
+  };
   payload?: string;
   status: "connected" | "error" | "idle" | "loading";
 };
@@ -81,6 +89,141 @@ const payoutHistory = [
   ["Mar 01, 2026", "Paid", "+$624.50"],
 ];
 
+function parseStoredConnections(user: User | null) {
+  const rawConnections =
+    user?.user_metadata &&
+    typeof user.user_metadata === "object" &&
+    user.user_metadata !== null &&
+    "connections" in user.user_metadata
+      ? user.user_metadata.connections
+      : null;
+
+  const fallback = {
+    tiktok: { status: "idle" } as ConnectionState,
+    x: { status: "idle" } as ConnectionState,
+  };
+
+  if (!rawConnections || typeof rawConnections !== "object") {
+    return fallback;
+  }
+
+  const parseConnection = (provider: ProviderKey): ConnectionState => {
+    const candidate =
+      provider in rawConnections &&
+      typeof rawConnections[provider] === "object" &&
+      rawConnections[provider] !== null
+        ? rawConnections[provider]
+        : null;
+
+    if (!candidate) {
+      return { status: "idle" };
+    }
+
+    const status =
+      "status" in candidate &&
+      (candidate.status === "connected" ||
+        candidate.status === "error" ||
+        candidate.status === "idle" ||
+        candidate.status === "loading")
+        ? candidate.status
+        : "idle";
+
+    const profile =
+      "profile" in candidate &&
+      typeof candidate.profile === "object" &&
+      candidate.profile !== null
+        ? {
+            handle:
+              "handle" in candidate.profile && typeof candidate.profile.handle === "string"
+                ? candidate.profile.handle
+                : null,
+            id:
+              "id" in candidate.profile && typeof candidate.profile.id === "string"
+                ? candidate.profile.id
+                : null,
+            imageUrl:
+              "imageUrl" in candidate.profile &&
+              typeof candidate.profile.imageUrl === "string"
+                ? candidate.profile.imageUrl
+                : null,
+            name:
+              "name" in candidate.profile && typeof candidate.profile.name === "string"
+                ? candidate.profile.name
+                : null,
+          }
+        : undefined;
+
+    const payload =
+      "payload" in candidate && typeof candidate.payload === "string"
+        ? candidate.payload
+        : undefined;
+
+    return {
+      payload,
+      profile,
+      status,
+    };
+  };
+
+  return {
+    tiktok: parseConnection("tiktok"),
+    x: parseConnection("x"),
+  };
+}
+
+function buildConnectionState(provider: ProviderKey, json: unknown): ConnectionState {
+  const payload = JSON.stringify(json, null, 2);
+
+  if (provider === "tiktok") {
+    const data =
+      json && typeof json === "object" && "data" in json && typeof json.data === "object"
+        ? json.data
+        : null;
+
+    return {
+      payload,
+      profile: data
+        ? {
+            handle: null,
+            id:
+              "open_id" in data && typeof data.open_id === "string" ? data.open_id : null,
+            imageUrl:
+              "avatar_url" in data && typeof data.avatar_url === "string"
+                ? data.avatar_url
+                : null,
+            name:
+              "display_name" in data && typeof data.display_name === "string"
+                ? data.display_name
+                : null,
+          }
+        : undefined,
+      status: "connected",
+    };
+  }
+
+  const data =
+    json && typeof json === "object" && "data" in json && typeof json.data === "object"
+      ? json.data
+      : null;
+
+  return {
+    payload,
+    profile: data
+      ? {
+          handle:
+            "username" in data && typeof data.username === "string" ? data.username : null,
+          id: "id" in data && typeof data.id === "string" ? data.id : null,
+          imageUrl:
+            "profile_image_url" in data && typeof data.profile_image_url === "string"
+              ? data.profile_image_url
+              : null,
+          name: "name" in data && typeof data.name === "string" ? data.name : null,
+        }
+      : undefined,
+    status: "connected",
+  };
+}
+
 function formatViewer(user: User | Viewer): Viewer {
   if (!user) {
     return null;
@@ -120,6 +263,25 @@ export function AcreExperience({
     }
   });
 
+  const persistConnections = useEffectEvent(async (nextConnections: {
+    tiktok: ConnectionState;
+    x: ConnectionState;
+  }) => {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      data: {
+        connections: nextConnections,
+      },
+    });
+
+    if (error) {
+      console.error("Unable to persist provider connections", error);
+    }
+  });
+
   useEffect(() => {
     if (!supabase) {
       return;
@@ -129,11 +291,21 @@ export function AcreExperience({
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setViewer(formatViewer(session?.user ?? null));
+      setConnections((current) => {
+        const stored = parseStoredConnections(session?.user ?? null);
+
+        return {
+          tiktok:
+            current.tiktok.status === "loading" ? current.tiktok : stored.tiktok,
+          x: current.x.status === "loading" ? current.x : stored.x,
+        };
+      });
     });
 
     void supabase.auth.getUser().then(({ data }) => {
       if (data.user) {
         setViewer(formatViewer(data.user));
+        setConnections(parseStoredConnections(data.user));
       }
     });
 
@@ -147,9 +319,12 @@ export function AcreExperience({
     const tasks: Promise<void>[] = [];
 
     const loadConnection = async (
-      provider: "tiktok" | "x",
+      provider: ProviderKey,
       endpoint: string,
       label: string,
+      options?: {
+        persistOnSuccess?: boolean;
+      },
     ) => {
       setConnections((current) => ({
         ...current,
@@ -165,13 +340,45 @@ export function AcreExperience({
           status: response.status,
         }));
 
-        setConnections((current) => ({
-          ...current,
-          [provider]: {
-            payload: JSON.stringify(json, null, 2),
-            status: response.ok ? "connected" : "error",
-          },
-        }));
+        if (response.ok) {
+          const nextProviderState = buildConnectionState(provider, json);
+
+          setConnections((current) => {
+            const nextConnections = {
+              ...current,
+              [provider]: nextProviderState,
+            };
+
+            if (options?.persistOnSuccess) {
+              void persistConnections(nextConnections);
+            }
+
+            return nextConnections;
+          });
+
+          return;
+        }
+
+        const nextState: ConnectionState =
+          response.status === 401
+            ? { status: "idle" }
+            : {
+                payload: JSON.stringify(json, null, 2),
+                status: "error",
+              };
+
+        setConnections((current) => {
+          const nextConnections = {
+            ...current,
+            [provider]: nextState,
+          };
+
+          if (response.status === 401 && current[provider].status === "connected") {
+            void persistConnections(nextConnections);
+          }
+
+          return nextConnections;
+        });
       } catch (error) {
         setConnections((current) => ({
           ...current,
@@ -189,16 +396,25 @@ export function AcreExperience({
 
     if (params.get("tiktok") === "connected") {
       setActiveScreen("oauth");
-      tasks.push(loadConnection("tiktok", "/api/tiktok-me", "TikTok profile"));
+      tasks.push(
+        loadConnection("tiktok", "/api/tiktok-me", "TikTok profile", {
+          persistOnSuccess: true,
+        }),
+      );
     }
 
     if (params.get("x") === "connected") {
       setActiveScreen("oauth");
+      tasks.push(loadConnection("x", "/api/auth/x-me", "X profile", { persistOnSuccess: true }));
+    }
+
+    if (!params.get("tiktok") && !params.get("x")) {
+      tasks.push(loadConnection("tiktok", "/api/tiktok-me", "TikTok profile"));
       tasks.push(loadConnection("x", "/api/auth/x-me", "X profile"));
     }
 
     void Promise.all(tasks);
-  }, [backendBaseUrl]);
+  }, [backendBaseUrl, supabase]);
 
   async function handleGoogleSignIn() {
     if (!supabase) {
@@ -249,8 +465,49 @@ export function AcreExperience({
     setAuthPending(false);
   }
 
-  function startProviderLink(path: string) {
-    window.location.href = `${backendBaseUrl}${path}`;
+  async function startProviderLink(path: string) {
+    if (!supabase) {
+      window.location.href = `${backendBaseUrl}${path}`;
+      return;
+    }
+
+    setAuthMessage(null);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const accessToken = session?.access_token;
+
+    if (!accessToken) {
+      setActiveScreen("signup");
+      setAuthMessage("Sign in with Google before linking TikTok or X.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendBaseUrl}${path}?return=json`, {
+        credentials: "include",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const json = await response.json().catch(() => ({
+        error: "Provider auth start returned a non-JSON response.",
+      }));
+
+      if (!response.ok || !json.url || typeof json.url !== "string") {
+        throw new Error(
+          typeof json.error === "string"
+            ? json.error
+            : "Unable to start the provider connection flow.",
+        );
+      }
+
+      window.location.href = json.url;
+    } catch (error) {
+      setAuthMessage(String(error));
+    }
   }
 
   return (
@@ -407,7 +664,7 @@ export function AcreExperience({
             <div className="provider-grid">
               <button
                 className="provider-card"
-                onClick={() => startProviderLink("/api/auth/tiktok")}
+                onClick={() => void startProviderLink("/api/auth/tiktok")}
                 type="button"
               >
                 <span className="provider-mark provider-mark-tiktok mono">TT</span>
@@ -418,7 +675,7 @@ export function AcreExperience({
               </button>
               <button
                 className="provider-card"
-                onClick={() => startProviderLink("/api/auth/x")}
+                onClick={() => void startProviderLink("/api/auth/x")}
                 type="button"
               >
                 <span className="provider-mark provider-mark-x mono">X</span>
