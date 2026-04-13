@@ -48,3 +48,4 @@ npm run dev
 - The copied `acre-tiktok-backend-main/` folder is ignored so it does not get committed accidentally.
 - TikTok and X still route through the live backend while Google auth is handled by Supabase.
 - Google sessions are currently handled client-side to avoid fragile SSR auth-cookie refreshes during the early migration.
+- Google OAuth uses Supabase's implicit browser flow so the callback does not depend on a stored PKCE verifier.

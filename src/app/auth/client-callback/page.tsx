@@ -19,11 +19,6 @@ export default function ClientAuthCallbackPage() {
       const next = getSafeNext(url.searchParams.get("next"));
       const urlError = url.searchParams.get("error_description") ?? url.searchParams.get("error");
 
-      if (!code) {
-        setMessage(urlError ?? "Google did not return a sign-in code. Please try again.");
-        return;
-      }
-
       const supabase = createClient();
 
       const finish = () => {
@@ -58,6 +53,12 @@ export default function ClientAuthCallbackPage() {
       if (session) {
         subscription.unsubscribe();
         finish();
+        return;
+      }
+
+      if (!code) {
+        subscription.unsubscribe();
+        setMessage(urlError ?? "Google did not return a usable sign-in session. Please try again.");
         return;
       }
 
