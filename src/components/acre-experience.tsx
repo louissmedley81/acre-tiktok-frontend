@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
@@ -77,9 +77,6 @@ const performanceStats = [
   { label: "Avg. Engagement", value: "6.8%", note: "+1.2% vs platform avg" },
 ];
 
-const CALLBACK_RETRY_ATTEMPTS = 8;
-const CALLBACK_RETRY_DELAY_MS = 750;
-
 const recentPosts = [
   ["GameVault clutch montage", "142.3K views", "+$1,209.55"],
   ["Insane triple kill edit", "87.1K views", "+$740.35"],
@@ -94,34 +91,6 @@ const payoutHistory = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function sanitizeConnectionForStorage(connection: ConnectionState) {
-  return {
-    profile: connection.profile,
-    status:
-      connection.status === "connected" ||
-      connection.status === "error" ||
-      connection.status === "idle"
-        ? connection.status
-        : "idle",
-  };
-}
-
-function sanitizeConnectionsForStorage(connections: {
-  tiktok: ConnectionState;
-  x: ConnectionState;
-}) {
-  return {
-    tiktok: sanitizeConnectionForStorage(connections.tiktok),
-    x: sanitizeConnectionForStorage(connections.x),
-  };
 }
 
 function parseStoredConnections(user: User | null) {
@@ -201,61 +170,29 @@ function parseStoredConnections(user: User | null) {
   };
 }
 
-function buildConnectionState(provider: ProviderKey, json: unknown): ConnectionState {
-  const payload = JSON.stringify(json, null, 2);
-
-  if (provider === "tiktok") {
-    const data =
-      isRecord(json) && "data" in json && isRecord(json.data)
-        ? json.data
-        : null;
-    const user = data && "user" in data && isRecord(data.user) ? data.user : data;
-
-    return {
-      payload,
-      profile: user
-        ? {
-            handle: null,
-            id:
-              "open_id" in user && typeof user.open_id === "string"
-                ? user.open_id
-                : "union_id" in user && typeof user.union_id === "string"
-                  ? user.union_id
-                  : null,
-            imageUrl:
-              "avatar_url" in user && typeof user.avatar_url === "string"
-                ? user.avatar_url
-                : null,
-            name:
-              "display_name" in user && typeof user.display_name === "string"
-                ? user.display_name
-                : null,
-          }
-        : undefined,
-      status: "connected",
-    };
-  }
-
-  const data =
-    isRecord(json) && "data" in json && isRecord(json.data)
-      ? json.data
-      : null;
+function mergeStoredConnections(
+  current: {
+    tiktok: ConnectionState;
+    x: ConnectionState;
+  },
+  stored: {
+    tiktok: ConnectionState;
+    x: ConnectionState;
+  },
+) {
+  const keepFreshConnection = (
+    provider: ProviderKey,
+  ): ConnectionState =>
+    current[provider].status === "connected" && stored[provider].status !== "connected"
+      ? current[provider]
+      : stored[provider];
 
   return {
-    payload,
-    profile: data
-      ? {
-          handle:
-            "username" in data && typeof data.username === "string" ? data.username : null,
-          id: "id" in data && typeof data.id === "string" ? data.id : null,
-          imageUrl:
-            "profile_image_url" in data && typeof data.profile_image_url === "string"
-              ? data.profile_image_url
-              : null,
-          name: "name" in data && typeof data.name === "string" ? data.name : null,
-        }
-      : undefined,
-    status: "connected",
+    tiktok:
+      current.tiktok.status === "loading"
+        ? current.tiktok
+        : keepFreshConnection("tiktok"),
+    x: current.x.status === "loading" ? current.x : keepFreshConnection("x"),
   };
 }
 
@@ -267,6 +204,22 @@ function formatViewer(user: User | Viewer): Viewer {
   return {
     email: user.email ?? null,
     id: user.id,
+  };
+}
+
+function buildVerifiedConnectionState(provider: ProviderKey): ConnectionState {
+  return {
+    payload: JSON.stringify(
+      {
+        detail:
+          "The backend OAuth callback confirmed this channel before returning to ACRE.",
+        provider,
+        source: "backend_callback",
+      },
+      null,
+      2,
+    ),
+    status: "connected",
   };
 }
 
@@ -298,29 +251,6 @@ export function AcreExperience({
     }
   });
 
-  const persistConnections = useEffectEvent(async (nextConnections: {
-    tiktok: ConnectionState;
-    x: ConnectionState;
-  }) => {
-    if (!supabase) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase.auth.updateUser({
-        data: {
-          connections: sanitizeConnectionsForStorage(nextConnections),
-        },
-      });
-
-      if (error) {
-        console.error("Unable to persist provider connections", error);
-      }
-    } catch (error) {
-      console.error("Unable to persist provider connections", error);
-    }
-  });
-
   useEffect(() => {
     if (!supabase) {
       return;
@@ -332,12 +262,7 @@ export function AcreExperience({
       setViewer(formatViewer(session?.user ?? null));
       setConnections((current) => {
         const stored = parseStoredConnections(session?.user ?? null);
-
-        return {
-          tiktok:
-            current.tiktok.status === "loading" ? current.tiktok : stored.tiktok,
-          x: current.x.status === "loading" ? current.x : stored.x,
-        };
+        return mergeStoredConnections(current, stored);
       });
     });
 
@@ -346,7 +271,9 @@ export function AcreExperience({
       .then(({ data }) => {
         if (data.user) {
           setViewer(formatViewer(data.user));
-          setConnections(parseStoredConnections(data.user));
+          setConnections((current) =>
+            mergeStoredConnections(current, parseStoredConnections(data.user)),
+          );
         }
       })
       .catch((error) => {
@@ -360,133 +287,35 @@ export function AcreExperience({
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const tasks: Promise<void>[] = [];
     const hasConnectionMarker =
       params.get("tiktok") === "connected" || params.get("x") === "connected";
 
-    const loadConnection = async (
-      provider: ProviderKey,
-      endpoint: string,
-      label: string,
-      options?: {
-        persistOnSuccess?: boolean;
-        retryAfterCallback?: boolean;
-      },
-    ) => {
-      setConnections((current) => ({
-        ...current,
-        [provider]: { status: "loading" },
-      }));
-
-      const maxAttempts = options?.retryAfterCallback ? CALLBACK_RETRY_ATTEMPTS : 1;
-
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        try {
-          const response = await fetch(`${backendBaseUrl}${endpoint}`, {
-            credentials: "include",
-          });
-          const json = await response.json().catch(() => ({
-            error: `${label} returned a non-JSON response`,
-            status: response.status,
-          }));
-
-          if (response.ok) {
-            const nextProviderState = buildConnectionState(provider, json);
-
-            setConnections((current) => {
-              const nextConnections = {
-                ...current,
-                [provider]: nextProviderState,
-              };
-
-              if (options?.persistOnSuccess) {
-                void persistConnections(nextConnections);
-              }
-
-              return nextConnections;
-            });
-
-            return;
-          }
-
-          if (
-            options?.retryAfterCallback &&
-            response.status === 401 &&
-            attempt < maxAttempts
-          ) {
-            await wait(CALLBACK_RETRY_DELAY_MS);
-            continue;
-          }
-
-          const nextState: ConnectionState =
-            response.status === 401
-              ? { status: "idle" }
-              : {
-                  payload: JSON.stringify(json, null, 2),
-                  status: "error",
-                };
-
-          setConnections((current) => {
-            const nextConnections = {
-              ...current,
-              [provider]: nextState,
-            };
-
-            if (response.status === 401 && current[provider].status === "connected") {
-              void persistConnections(nextConnections);
-            }
-
-            return nextConnections;
-          });
-
-          return;
-        } catch (error) {
-          if (options?.retryAfterCallback && attempt < maxAttempts) {
-            await wait(CALLBACK_RETRY_DELAY_MS);
-            continue;
-          }
-
-          setConnections((current) => ({
-            ...current,
-            [provider]: {
-              payload: JSON.stringify(
-                { detail: String(error), error: `Unable to load ${label}` },
-                null,
-                2,
-              ),
-              status: "error",
-            },
-          }));
-        }
-      }
-    };
-
     if (params.get("tiktok") === "connected") {
       setActiveScreen("oauth");
-      tasks.push(
-        loadConnection("tiktok", "/api/tiktok-me", "TikTok profile", {
-          persistOnSuccess: true,
-          retryAfterCallback: true,
-        }),
-      );
+      setConnections((current) => ({
+        ...current,
+        tiktok:
+          current.tiktok.status === "connected"
+            ? current.tiktok
+            : buildVerifiedConnectionState("tiktok"),
+      }));
     }
 
     if (params.get("x") === "connected") {
       setActiveScreen("oauth");
-      tasks.push(
-        loadConnection("x", "/api/auth/x-me", "X profile", {
-          persistOnSuccess: true,
-          retryAfterCallback: true,
-        }),
-      );
+      setConnections((current) => ({
+        ...current,
+        x:
+          current.x.status === "connected"
+            ? current.x
+            : buildVerifiedConnectionState("x"),
+      }));
     }
 
-    void Promise.allSettled(tasks).then(() => {
-      if (hasConnectionMarker) {
-        window.history.replaceState(null, "", window.location.pathname);
-      }
-    });
-  }, [backendBaseUrl, supabase]);
+    if (hasConnectionMarker) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   async function handleGoogleSignIn() {
     if (!supabase) {
