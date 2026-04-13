@@ -31,6 +31,8 @@ NEXT_PUBLIC_BACKEND_URL=https://acre-tiktok-backend-main.vercel.app
 3. In Google Cloud, use the callback URL shown by Supabase on the Google provider screen.
 4. Set your Site URL in Supabase to your frontend domain.
 
+The app prefers `/auth/callback` for Supabase auth, but the homepage also forwards root-level `?code=` redirects into the callback route as a safety fallback.
+
 ## Local Development
 
 ```bash
