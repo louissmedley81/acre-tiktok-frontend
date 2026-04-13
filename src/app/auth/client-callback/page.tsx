@@ -35,6 +35,7 @@ export default function ClientAuthCallbackPage() {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((event, session) => {
         if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session) {
+          subscription.unsubscribe();
           finish();
         }
       });
