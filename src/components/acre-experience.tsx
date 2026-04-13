@@ -209,21 +209,26 @@ function buildConnectionState(provider: ProviderKey, json: unknown): ConnectionS
       isRecord(json) && "data" in json && isRecord(json.data)
         ? json.data
         : null;
+    const user = data && "user" in data && isRecord(data.user) ? data.user : data;
 
     return {
       payload,
-      profile: data
+      profile: user
         ? {
             handle: null,
             id:
-              "open_id" in data && typeof data.open_id === "string" ? data.open_id : null,
+              "open_id" in user && typeof user.open_id === "string"
+                ? user.open_id
+                : "union_id" in user && typeof user.union_id === "string"
+                  ? user.union_id
+                  : null,
             imageUrl:
-              "avatar_url" in data && typeof data.avatar_url === "string"
-                ? data.avatar_url
+              "avatar_url" in user && typeof user.avatar_url === "string"
+                ? user.avatar_url
                 : null,
             name:
-              "display_name" in data && typeof data.display_name === "string"
-                ? data.display_name
+              "display_name" in user && typeof user.display_name === "string"
+                ? user.display_name
                 : null,
           }
         : undefined,
