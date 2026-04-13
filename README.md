@@ -50,3 +50,4 @@ npm run dev
 - Google sessions are currently handled client-side to avoid fragile SSR auth-cookie refreshes during the early migration.
 - Google OAuth uses Supabase's implicit browser flow so the callback does not depend on a stored PKCE verifier.
 - TikTok and X linking can still fall back to the legacy backend OAuth redirect if no Supabase session is available yet.
+- TikTok and X callbacks land on `/auth/social-callback` first, then move back to the dashboard after cookies have settled.
