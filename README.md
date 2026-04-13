@@ -6,7 +6,7 @@ This repo is now the Next.js App Router frontend for ACRE. It keeps the current 
 
 - Next.js App Router
 - React 19
-- Supabase Auth with cookie-based SSR helpers
+- Supabase Auth with browser-managed sessions
 - Existing Vercel backend for TikTok and X OAuth
 
 ## Environment Variables
@@ -47,3 +47,4 @@ npm run dev
 - `index.html` remains in the repo as a legacy reference during the migration.
 - The copied `acre-tiktok-backend-main/` folder is ignored so it does not get committed accidentally.
 - TikTok and X still route through the live backend while Google auth is handled by Supabase.
+- Google sessions are currently handled client-side to avoid fragile SSR auth-cookie refreshes during the early migration.
