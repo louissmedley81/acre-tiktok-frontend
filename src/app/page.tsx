@@ -25,7 +25,7 @@ export default async function Home({ searchParams }: HomeProps) {
     const next = requestedNext.startsWith("/") ? requestedNext : "/";
 
     redirect(
-      `/auth/callback?code=${encodeURIComponent(code)}&next=${encodeURIComponent(next)}`,
+      `/auth/client-callback?code=${encodeURIComponent(code)}&next=${encodeURIComponent(next)}`,
     );
   }
 

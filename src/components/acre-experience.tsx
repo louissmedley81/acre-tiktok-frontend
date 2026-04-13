@@ -461,7 +461,7 @@ export function AcreExperience({
           access_type: "offline",
           prompt: "consent",
         },
-        redirectTo: `${window.location.origin}/auth/callback?next=/`,
+        redirectTo: `${window.location.origin}/auth/client-callback?next=/`,
       },
     });
 
