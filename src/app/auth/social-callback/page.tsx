@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 type Provider = "tiktok" | "x";
 
-type CallbackStatus = "checking" | "confirmed" | "error";
+type CallbackStatus = "checking" | "confirmed" | "slow";
 
 const backendBaseUrl = (
   process.env.NEXT_PUBLIC_BACKEND_URL || "https://acre-tiktok-backend-main.vercel.app"
@@ -85,14 +85,12 @@ export default function SocialCallbackPage() {
           // backend confirms the freshly issued OAuth cookies are usable.
         }
 
-        nextAttempt += 1;
-
-        if (nextAttempt > 45) {
-          setStatus("error");
-          return;
+        if (nextAttempt === 45) {
+          setStatus("slow");
         }
 
-        await wait(1000);
+        await wait(nextAttempt >= 45 ? 2500 : 1000);
+        nextAttempt += 1;
       }
     }
 
@@ -104,7 +102,7 @@ export default function SocialCallbackPage() {
   }, []);
 
   const label = provider ? providerConfig[provider].label : "channel";
-  const isError = status === "error";
+  const isSlow = status === "slow";
   const isConfirmed = status === "confirmed";
 
   return (
@@ -136,23 +134,23 @@ export default function SocialCallbackPage() {
             textTransform: "uppercase",
           }}
         >
-          {isError ? "Still Checking" : "Channel Connected"}
+          {isSlow ? "Still Checking" : "Channel Connected"}
         </p>
         <h1 style={{ fontSize: "36px", margin: "0 0 12px" }}>
           {isConfirmed
             ? `${label} is connected`
-            : isError
-              ? `${label} needs one more check`
+            : isSlow
+              ? `Still waiting for ${label}`
               : `Finishing ${label} setup`}
         </h1>
         <p style={{ color: "rgba(232,238,248,0.72)", lineHeight: 1.7, margin: 0 }}>
           {isConfirmed
             ? "We confirmed the connection and are taking you back to ACRE."
-            : isError
-              ? "The connection may still be completing. You can keep this page open, try again, or continue back to the dashboard."
+            : isSlow
+              ? `This is taking longer than normal, but we are still checking for ${label} tokens. You can keep this page open, or continue manually if you already see the channel connected after a reload.`
               : `We are waiting for ${label} tokens to become available before loading your dashboard. Check ${attempt}/45.`}
         </p>
-        {isError ? (
+        {isSlow ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "24px" }}>
             <button
               onClick={() => window.location.reload()}
