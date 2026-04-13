@@ -306,13 +306,17 @@ export function AcreExperience({
       return;
     }
 
-    const { error } = await supabase.auth.updateUser({
-      data: {
-        connections: sanitizeConnectionsForStorage(nextConnections),
-      },
-    });
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          connections: sanitizeConnectionsForStorage(nextConnections),
+        },
+      });
 
-    if (error) {
+      if (error) {
+        console.error("Unable to persist provider connections", error);
+      }
+    } catch (error) {
       console.error("Unable to persist provider connections", error);
     }
   });
@@ -337,12 +341,17 @@ export function AcreExperience({
       });
     });
 
-    void supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
-        setViewer(formatViewer(data.user));
-        setConnections(parseStoredConnections(data.user));
-      }
-    });
+    void supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        if (data.user) {
+          setViewer(formatViewer(data.user));
+          setConnections(parseStoredConnections(data.user));
+        }
+      })
+      .catch((error) => {
+        console.error("Unable to load Supabase user", error);
+      });
 
     return () => {
       subscription.unsubscribe();
@@ -470,11 +479,6 @@ export function AcreExperience({
           retryAfterCallback: true,
         }),
       );
-    }
-
-    if (!params.get("tiktok") && !params.get("x")) {
-      tasks.push(loadConnection("tiktok", "/api/tiktok-me", "TikTok profile"));
-      tasks.push(loadConnection("x", "/api/auth/x-me", "X profile"));
     }
 
     void Promise.allSettled(tasks).then(() => {
