@@ -17,26 +17,64 @@ export default function ClientAuthCallbackPage() {
       const url = new URL(window.location.href);
       const code = url.searchParams.get("code");
       const next = getSafeNext(url.searchParams.get("next"));
+      const urlError = url.searchParams.get("error_description") ?? url.searchParams.get("error");
 
       if (!code) {
-        setMessage("Google did not return a sign-in code. Please try again.");
+        setMessage(urlError ?? "Google did not return a sign-in code. Please try again.");
         return;
       }
 
       const supabase = createClient();
+
+      const finish = () => {
+        window.history.replaceState(null, "", next);
+        window.location.replace(next);
+      };
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((event, session) => {
+        if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session) {
+          finish();
+        }
+      });
+
+      window.setTimeout(() => {
+        subscription.unsubscribe();
+      }, 8000);
+
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (cancelled) {
+        subscription.unsubscribe();
+        return;
+      }
+
+      if (session) {
+        subscription.unsubscribe();
+        finish();
+        return;
+      }
+
       const { error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (cancelled) {
+        subscription.unsubscribe();
         return;
       }
 
       if (error) {
+        subscription.unsubscribe();
         setMessage(`Google sign-in could not be completed: ${error.message}`);
         return;
       }
 
-      window.history.replaceState(null, "", next);
-      window.location.replace(next);
+      subscription.unsubscribe();
+      finish();
     }
 
     void completeSignIn();
