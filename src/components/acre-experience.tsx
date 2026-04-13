@@ -89,12 +89,35 @@ const payoutHistory = [
   ["Mar 01, 2026", "Paid", "+$624.50"],
 ];
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function sanitizeConnectionForStorage(connection: ConnectionState) {
+  return {
+    profile: connection.profile,
+    status:
+      connection.status === "connected" ||
+      connection.status === "error" ||
+      connection.status === "idle"
+        ? connection.status
+        : "idle",
+  };
+}
+
+function sanitizeConnectionsForStorage(connections: {
+  tiktok: ConnectionState;
+  x: ConnectionState;
+}) {
+  return {
+    tiktok: sanitizeConnectionForStorage(connections.tiktok),
+    x: sanitizeConnectionForStorage(connections.x),
+  };
+}
+
 function parseStoredConnections(user: User | null) {
   const rawConnections =
-    user?.user_metadata &&
-    typeof user.user_metadata === "object" &&
-    user.user_metadata !== null &&
-    "connections" in user.user_metadata
+    isRecord(user?.user_metadata) && "connections" in user.user_metadata
       ? user.user_metadata.connections
       : null;
 
@@ -103,15 +126,14 @@ function parseStoredConnections(user: User | null) {
     x: { status: "idle" } as ConnectionState,
   };
 
-  if (!rawConnections || typeof rawConnections !== "object") {
+  if (!isRecord(rawConnections)) {
     return fallback;
   }
 
   const parseConnection = (provider: ProviderKey): ConnectionState => {
     const candidate =
       provider in rawConnections &&
-      typeof rawConnections[provider] === "object" &&
-      rawConnections[provider] !== null
+      isRecord(rawConnections[provider])
         ? rawConnections[provider]
         : null;
 
@@ -130,8 +152,7 @@ function parseStoredConnections(user: User | null) {
 
     const profile =
       "profile" in candidate &&
-      typeof candidate.profile === "object" &&
-      candidate.profile !== null
+      isRecord(candidate.profile)
         ? {
             handle:
               "handle" in candidate.profile && typeof candidate.profile.handle === "string"
@@ -176,7 +197,7 @@ function buildConnectionState(provider: ProviderKey, json: unknown): ConnectionS
 
   if (provider === "tiktok") {
     const data =
-      json && typeof json === "object" && "data" in json && typeof json.data === "object"
+      isRecord(json) && "data" in json && isRecord(json.data)
         ? json.data
         : null;
 
@@ -202,7 +223,7 @@ function buildConnectionState(provider: ProviderKey, json: unknown): ConnectionS
   }
 
   const data =
-    json && typeof json === "object" && "data" in json && typeof json.data === "object"
+    isRecord(json) && "data" in json && isRecord(json.data)
       ? json.data
       : null;
 
@@ -273,7 +294,7 @@ export function AcreExperience({
 
     const { error } = await supabase.auth.updateUser({
       data: {
-        connections: nextConnections,
+        connections: sanitizeConnectionsForStorage(nextConnections),
       },
     });
 
@@ -317,6 +338,8 @@ export function AcreExperience({
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tasks: Promise<void>[] = [];
+    const hasConnectionMarker =
+      params.get("tiktok") === "connected" || params.get("x") === "connected";
 
     const loadConnection = async (
       provider: ProviderKey,
@@ -406,6 +429,10 @@ export function AcreExperience({
     if (params.get("x") === "connected") {
       setActiveScreen("oauth");
       tasks.push(loadConnection("x", "/api/auth/x-me", "X profile", { persistOnSuccess: true }));
+    }
+
+    if (hasConnectionMarker) {
+      window.history.replaceState(null, "", window.location.pathname);
     }
 
     if (!params.get("tiktok") && !params.get("x")) {
