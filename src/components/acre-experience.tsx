@@ -507,8 +507,7 @@ export function AcreExperience({
     const accessToken = session?.access_token;
 
     if (!accessToken) {
-      setActiveScreen("signup");
-      setAuthMessage("Sign in with Google before linking TikTok or X.");
+      window.location.href = `${backendBaseUrl}${path}`;
       return;
     }
 
@@ -533,7 +532,8 @@ export function AcreExperience({
 
       window.location.href = json.url;
     } catch (error) {
-      setAuthMessage(String(error));
+      console.error("Unable to bridge Supabase session into provider link", error);
+      window.location.href = `${backendBaseUrl}${path}`;
     }
   }
 
