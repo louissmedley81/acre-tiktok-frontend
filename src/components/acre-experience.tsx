@@ -77,6 +77,9 @@ const performanceStats = [
   { label: "Avg. Engagement", value: "6.8%", note: "+1.2% vs platform avg" },
 ];
 
+const CALLBACK_RETRY_ATTEMPTS = 8;
+const CALLBACK_RETRY_DELAY_MS = 750;
+
 const recentPosts = [
   ["GameVault clutch montage", "142.3K views", "+$1,209.55"],
   ["Insane triple kill edit", "87.1K views", "+$740.35"],
@@ -91,6 +94,12 @@ const payoutHistory = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function sanitizeConnectionForStorage(connection: ConnectionState) {
@@ -347,6 +356,7 @@ export function AcreExperience({
       label: string,
       options?: {
         persistOnSuccess?: boolean;
+        retryAfterCallback?: boolean;
       },
     ) => {
       setConnections((current) => ({
@@ -354,25 +364,61 @@ export function AcreExperience({
         [provider]: { status: "loading" },
       }));
 
-      try {
-        const response = await fetch(`${backendBaseUrl}${endpoint}`, {
-          credentials: "include",
-        });
-        const json = await response.json().catch(() => ({
-          error: `${label} returned a non-JSON response`,
-          status: response.status,
-        }));
+      const maxAttempts = options?.retryAfterCallback ? CALLBACK_RETRY_ATTEMPTS : 1;
 
-        if (response.ok) {
-          const nextProviderState = buildConnectionState(provider, json);
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const response = await fetch(`${backendBaseUrl}${endpoint}`, {
+            credentials: "include",
+          });
+          const json = await response.json().catch(() => ({
+            error: `${label} returned a non-JSON response`,
+            status: response.status,
+          }));
+
+          if (response.ok) {
+            const nextProviderState = buildConnectionState(provider, json);
+
+            setConnections((current) => {
+              const nextConnections = {
+                ...current,
+                [provider]: nextProviderState,
+              };
+
+              if (options?.persistOnSuccess) {
+                void persistConnections(nextConnections);
+              }
+
+              return nextConnections;
+            });
+
+            return;
+          }
+
+          if (
+            options?.retryAfterCallback &&
+            response.status === 401 &&
+            attempt < maxAttempts
+          ) {
+            await wait(CALLBACK_RETRY_DELAY_MS);
+            continue;
+          }
+
+          const nextState: ConnectionState =
+            response.status === 401
+              ? { status: "idle" }
+              : {
+                  payload: JSON.stringify(json, null, 2),
+                  status: "error",
+                };
 
           setConnections((current) => {
             const nextConnections = {
               ...current,
-              [provider]: nextProviderState,
+              [provider]: nextState,
             };
 
-            if (options?.persistOnSuccess) {
+            if (response.status === 401 && current[provider].status === "connected") {
               void persistConnections(nextConnections);
             }
 
@@ -380,40 +426,24 @@ export function AcreExperience({
           });
 
           return;
-        }
-
-        const nextState: ConnectionState =
-          response.status === 401
-            ? { status: "idle" }
-            : {
-                payload: JSON.stringify(json, null, 2),
-                status: "error",
-              };
-
-        setConnections((current) => {
-          const nextConnections = {
-            ...current,
-            [provider]: nextState,
-          };
-
-          if (response.status === 401 && current[provider].status === "connected") {
-            void persistConnections(nextConnections);
+        } catch (error) {
+          if (options?.retryAfterCallback && attempt < maxAttempts) {
+            await wait(CALLBACK_RETRY_DELAY_MS);
+            continue;
           }
 
-          return nextConnections;
-        });
-      } catch (error) {
-        setConnections((current) => ({
-          ...current,
-          [provider]: {
-            payload: JSON.stringify(
-              { detail: String(error), error: `Unable to load ${label}` },
-              null,
-              2,
-            ),
-            status: "error",
-          },
-        }));
+          setConnections((current) => ({
+            ...current,
+            [provider]: {
+              payload: JSON.stringify(
+                { detail: String(error), error: `Unable to load ${label}` },
+                null,
+                2,
+              ),
+              status: "error",
+            },
+          }));
+        }
       }
     };
 
@@ -422,17 +452,19 @@ export function AcreExperience({
       tasks.push(
         loadConnection("tiktok", "/api/tiktok-me", "TikTok profile", {
           persistOnSuccess: true,
+          retryAfterCallback: true,
         }),
       );
     }
 
     if (params.get("x") === "connected") {
       setActiveScreen("oauth");
-      tasks.push(loadConnection("x", "/api/auth/x-me", "X profile", { persistOnSuccess: true }));
-    }
-
-    if (hasConnectionMarker) {
-      window.history.replaceState(null, "", window.location.pathname);
+      tasks.push(
+        loadConnection("x", "/api/auth/x-me", "X profile", {
+          persistOnSuccess: true,
+          retryAfterCallback: true,
+        }),
+      );
     }
 
     if (!params.get("tiktok") && !params.get("x")) {
@@ -440,7 +472,11 @@ export function AcreExperience({
       tasks.push(loadConnection("x", "/api/auth/x-me", "X profile"));
     }
 
-    void Promise.all(tasks);
+    void Promise.allSettled(tasks).then(() => {
+      if (hasConnectionMarker) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    });
   }, [backendBaseUrl, supabase]);
 
   async function handleGoogleSignIn() {
