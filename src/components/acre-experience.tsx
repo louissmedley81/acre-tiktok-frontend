@@ -9,7 +9,7 @@ type InitialUser = {
   id: string;
 } | null;
 
-type Screen = "campaigns" | "dashboard" | "oauth" | "signup" | "upload";
+type Screen = "campaigns" | "dashboard" | "oauth" | "upload";
 
 type Viewer = {
   email: string | null;
@@ -35,13 +35,47 @@ type Props = {
   supabaseReady: boolean;
 };
 
-const navItems: Array<{ key: Screen; label: string }> = [
-  { key: "signup", label: "Sign In" },
-  { key: "oauth", label: "Link Channels" },
-  { key: "campaigns", label: "Campaigns" },
-  { key: "upload", label: "Submit" },
-  { key: "dashboard", label: "Dashboard" },
+const navItems: Array<{
+  icon: string;
+  key: Screen;
+  label: string;
+  note: string;
+}> = [
+  { icon: "DB", key: "dashboard", label: "Dashboard", note: "Overview" },
+  { icon: "LC", key: "oauth", label: "Link Channels", note: "TikTok + X" },
+  { icon: "CP", key: "campaigns", label: "Campaigns", note: "Active briefs" },
+  { icon: "SB", key: "upload", label: "Submit", note: "Content links" },
 ];
+
+const screenMeta: Record<
+  Screen,
+  {
+    eyebrow: string;
+    summary: string;
+    title: string;
+  }
+> = {
+  campaigns: {
+    eyebrow: "Campaigns",
+    summary: "Browse available paid briefs and jump straight into content submission.",
+    title: "Campaign feed",
+  },
+  dashboard: {
+    eyebrow: "Dashboard",
+    summary: "A cleaner home base for views, earnings, campaign activity, and channel health.",
+    title: "Creator performance",
+  },
+  oauth: {
+    eyebrow: "Channels",
+    summary: "Connect TikTok and X so ACRE can attach future stats to your creator profile.",
+    title: "Link channels",
+  },
+  upload: {
+    eyebrow: "Submit",
+    summary: "Add post links for campaign review and future performance tracking.",
+    title: "Submit content",
+  },
+};
 
 const campaigns = [
   {
@@ -228,9 +262,10 @@ export function AcreExperience({
   initialUser,
   supabaseReady,
 }: Props) {
-  const [activeScreen, setActiveScreen] = useState<Screen>("signup");
+  const [activeScreen, setActiveScreen] = useState<Screen>("dashboard");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authPending, setAuthPending] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [viewer, setViewer] = useState<Viewer>(initialUser);
   const [connections, setConnections] = useState<{
     tiktok: ConnectionState;
@@ -362,7 +397,7 @@ export function AcreExperience({
     }
 
     setViewer(null);
-    setActiveScreen("signup");
+    setActiveScreen("dashboard");
     setAuthPending(false);
   }
 
@@ -411,155 +446,104 @@ export function AcreExperience({
     }
   }
 
+  const activeMeta = screenMeta[activeScreen];
+
   return (
-    <main className="acre-shell">
+    <main className={sidebarOpen ? "acre-app sidebar-open" : "acre-app sidebar-collapsed"}>
       <div className="acre-orb acre-orb-lime" />
       <div className="acre-orb acre-orb-signal" />
 
-      <header className="acre-topbar">
-        <div>
-          <p className="eyebrow">Acre Creator System</p>
-          <h1>ACRE</h1>
-        </div>
-        <div className="topbar-status">
-          <span className="status-pill mono">
-            {viewer ? "live auth" : "migration build"}
-          </span>
-          <span className="status-pill status-pill-muted mono">v0.2 foundation</span>
-        </div>
-      </header>
-
-      <nav className="acre-nav">
-        {navItems.map((item) => (
+      <aside className="acre-sidebar" aria-label="Main navigation">
+        <div className="sidebar-brand">
+          <span className="brand-mark mono">A</span>
+          <div className="sidebar-brand-copy">
+            <strong>ACRE</strong>
+            <small>Creator dashboard</small>
+          </div>
           <button
-            key={item.key}
-            className={item.key === activeScreen ? "nav-chip active" : "nav-chip"}
-            onClick={() => setActiveScreen(item.key)}
+            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            className="sidebar-toggle"
+            onClick={() => setSidebarOpen((open) => !open)}
             type="button"
           >
-            {item.label}
+            {sidebarOpen ? "<" : ">"}
           </button>
-        ))}
-      </nav>
-
-      <section className="hero-grid">
-        <div className="hero-copy acre-panel">
-          <p className="eyebrow">Migration In Progress</p>
-          <h2>
-            Your frontend is now moving onto a structure that can actually support
-            real auth, stored creator data, and a proper dashboard.
-          </h2>
-          <p className="hero-text">
-            Google sign-in is handled by Supabase, while TikTok and X still route
-            through your existing Vercel backend for now. That gives us a cleaner
-            foundation without breaking the working social connection flow.
-          </p>
-          <div className="hero-metrics">
-            <div>
-              <span className="metric-label mono">Auth Layer</span>
-              <strong>Supabase Google OAuth</strong>
-            </div>
-            <div>
-              <span className="metric-label mono">Backend Link</span>
-              <strong>{backendBaseUrl.replace(/^https?:\/\//, "")}</strong>
-            </div>
-          </div>
         </div>
 
-        <div className="hero-side acre-panel">
-          <p className="eyebrow">Account State</p>
-          <div className="account-card">
-            <span className="account-badge">{viewer ? "ON" : "OFF"}</span>
-            <div>
-              <h3>{viewer ? "Signed in with Supabase" : "Google sign-in ready"}</h3>
-              <p>
-                {viewer?.email ??
-                  "Add your Supabase keys and Google provider settings to turn on live auth."}
-              </p>
-            </div>
+        <nav className="sidebar-nav">
+          {navItems.map((item) => (
+            <button
+              key={item.key}
+              className={item.key === activeScreen ? "sidebar-link active" : "sidebar-link"}
+              onClick={() => setActiveScreen(item.key)}
+              type="button"
+            >
+              <span className="sidebar-icon mono">{item.icon}</span>
+              <span className="sidebar-label">
+                <strong>{item.label}</strong>
+                <small>{item.note}</small>
+              </span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <span className="metric-label mono">Connected</span>
+          <div className="sidebar-status-row">
+            <span className={`connection-dot ${connections.tiktok.status}`} />
+            <span>TikTok</span>
           </div>
-          {!supabaseReady && (
-            <div className="inline-note">
-              Supabase keys are not configured yet, so the Google button will stay in
-              setup mode until `.env.local` is added.
-            </div>
-          )}
-          {authMessage && <div className="inline-note inline-note-error">{authMessage}</div>}
-        </div>
-      </section>
-
-      <section className={activeScreen === "signup" ? "screen active" : "screen"}>
-        <div className="signup-grid">
-          <div className="acre-panel">
-            <p className="eyebrow">Step 1</p>
-            <h3>Sign into ACRE</h3>
-            <p className="section-copy">
-              This is the new account entry point. Once you are signed in here, we can
-              attach linked channels, client stats, payouts, and future database tables
-              to a real user identity.
-            </p>
-
-            <div className="field-grid">
-              <label>
-                <span className="field-label mono">First name</span>
-                <input className="text-field" placeholder="Joe" />
-              </label>
-              <label>
-                <span className="field-label mono">Last name</span>
-                <input className="text-field" placeholder="Smedley" />
-              </label>
-              <label>
-                <span className="field-label mono">Email</span>
-                <input className="text-field" placeholder="joe@example.com" />
-              </label>
-              <label>
-                <span className="field-label mono">Brand / studio</span>
-                <input className="text-field" placeholder="ACRE Media" />
-              </label>
-            </div>
-
-            <div className="button-stack">
-              <button
-                className="primary-button"
-                onClick={() => setActiveScreen("oauth")}
-                type="button"
-              >
-                Continue into channel setup
-              </button>
-              <button
-                className="ghost-button"
-                disabled={authPending}
-                onClick={viewer ? handleSignOut : handleGoogleSignIn}
-                type="button"
-              >
-                {authPending
-                  ? "Working..."
-                  : viewer
-                    ? "Sign out"
-                    : "Sign in with Google"}
-              </button>
-            </div>
-          </div>
-
-          <div className="acre-panel feature-card">
-            <p className="eyebrow">Why This Matters</p>
-            <ul className="feature-list">
-              <li>Google auth can become your clean app identity layer.</li>
-              <li>Supabase sessions replace hand-rolled account state in the browser.</li>
-              <li>Channel stats and payout history can move into actual tables next.</li>
-            </ul>
+          <div className="sidebar-status-row">
+            <span className={`connection-dot ${connections.x.status}`} />
+            <span>X</span>
           </div>
         </div>
-      </section>
+      </aside>
 
-      <section className={activeScreen === "oauth" ? "screen active" : "screen"}>
+      <div className="acre-main">
+        <header className="app-header">
+          <button
+            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            className="mobile-menu-button"
+            onClick={() => setSidebarOpen((open) => !open)}
+            type="button"
+          >
+            Menu
+          </button>
+          <div className="header-copy-block">
+            <p className="eyebrow">{activeMeta.eyebrow}</p>
+            <h1>{activeMeta.title}</h1>
+            <p>{activeMeta.summary}</p>
+          </div>
+          <div className="header-actions">
+            <span className="status-pill mono">{viewer ? "signed in" : "guest"}</span>
+            <button
+              className="signin-button"
+              disabled={authPending}
+              onClick={viewer ? handleSignOut : handleGoogleSignIn}
+              type="button"
+            >
+              {authPending ? "Working..." : viewer ? "Sign out" : "Sign in"}
+            </button>
+          </div>
+        </header>
+
+        {!supabaseReady && (
+          <div className="inline-note">
+            Supabase keys are not configured yet, so Google sign-in will stay in
+            setup mode until the public env vars are available.
+          </div>
+        )}
+        {authMessage && <div className="inline-note inline-note-error">{authMessage}</div>}
+
+        <section className={activeScreen === "oauth" ? "screen active" : "screen"}>
         <div className="oauth-grid">
           <div className="acre-panel">
-            <p className="eyebrow">Step 2</p>
+            <p className="eyebrow">Publishing Channels</p>
             <h3>Link your publishing channels</h3>
             <p className="section-copy">
-              TikTok and X are still powered by your live Vercel backend, so the migration
-              keeps the flows you already had while the rest of the app catches up.
+              Connect the accounts you want ACRE to track. TikTok and X still run
+              through the hardened backend callback flow.
             </p>
 
             <div className="provider-grid">
@@ -589,7 +573,7 @@ export function AcreExperience({
           </div>
 
           <div className="acre-panel">
-            <p className="eyebrow">Connection Debug</p>
+            <p className="eyebrow">Connection Status</p>
             <div className="connection-block">
               <div className="connection-header">
                 <strong>TikTok</strong>
@@ -615,17 +599,16 @@ export function AcreExperience({
             </div>
           </div>
         </div>
-      </section>
+        </section>
 
-      <section className={activeScreen === "campaigns" ? "screen active" : "screen"}>
+        <section className={activeScreen === "campaigns" ? "screen active" : "screen"}>
         <div className="section-head">
           <div>
-            <p className="eyebrow">Step 3</p>
+            <p className="eyebrow">Open Briefs</p>
             <h3>Campaign feed</h3>
           </div>
           <p className="section-copy">
-            This stays close to your original wireframe, but it now lives in real React
-            components instead of a single HTML file.
+            Review available campaigns, compare CPMs, and choose the next brief to submit.
           </p>
         </div>
 
@@ -659,16 +642,16 @@ export function AcreExperience({
             </article>
           ))}
         </div>
-      </section>
+        </section>
 
-      <section className={activeScreen === "upload" ? "screen active" : "screen"}>
+        <section className={activeScreen === "upload" ? "screen active" : "screen"}>
         <div className="upload-grid">
           <div className="acre-panel">
-            <p className="eyebrow">Step 4</p>
+            <p className="eyebrow">Content Intake</p>
             <h3>Submit content links</h3>
             <p className="section-copy">
-              This is the piece that should eventually write to Supabase tables instead of
-              sitting as static browser state. For now, the UI is ready for that next step.
+              Drop in TikTok or X links for review. This panel is ready to connect
+              to Supabase-backed submissions next.
             </p>
             <div className="link-row">
               <input
@@ -707,17 +690,16 @@ export function AcreExperience({
             </ul>
           </div>
         </div>
-      </section>
+        </section>
 
-      <section className={activeScreen === "dashboard" ? "screen active" : "screen"}>
+        <section className={activeScreen === "dashboard" ? "screen active" : "screen"}>
         <div className="section-head">
           <div>
-            <p className="eyebrow">Step 5</p>
-            <h3>Dashboard foundation</h3>
+            <p className="eyebrow">Home</p>
+            <h3>Dashboard</h3>
           </div>
           <p className="section-copy">
-            These numbers are still mock data, but the screen is now positioned inside a
-            real app structure where we can replace them with Supabase-backed stats.
+            A quick read on account performance, active posts, and payout movement.
           </p>
         </div>
 
@@ -777,7 +759,8 @@ export function AcreExperience({
             ))}
           </div>
         </div>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }
