@@ -21,6 +21,7 @@ type Viewer = {
 type ProviderKey = "tiktok" | "x";
 
 type ConnectionState = {
+  connectedAt?: string | null;
   profile?: {
     handle?: string | null;
     id?: string | null;
@@ -29,6 +30,11 @@ type ConnectionState = {
   };
   payload?: string;
   status: "connected" | "error" | "idle" | "loading";
+};
+
+type ConnectionsState = {
+  tiktok: ConnectionState;
+  x: ConnectionState;
 };
 
 type Props = {
@@ -129,6 +135,62 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function getOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function getConnectionStatus(value: unknown): ConnectionState["status"] {
+  return value === "connected" ||
+    value === "error" ||
+    value === "idle" ||
+    value === "loading"
+    ? value
+    : "idle";
+}
+
+function parseConnectionProfile(
+  value: unknown,
+): ConnectionState["profile"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const profile = {
+    handle: getOptionalString(value.handle),
+    id: getOptionalString(value.id),
+    imageUrl: getOptionalString(value.imageUrl),
+    name: getOptionalString(value.name),
+  };
+
+  return Object.values(profile).some(Boolean) ? profile : undefined;
+}
+
+function buildConnectionPayload({
+  connectedAt,
+  profile,
+  provider,
+  source,
+  status,
+}: {
+  connectedAt?: string | null;
+  profile?: ConnectionState["profile"];
+  provider: ProviderKey;
+  source: string;
+  status: ConnectionState["status"];
+}) {
+  return JSON.stringify(
+    {
+      connectedAt: connectedAt ?? null,
+      profile: profile ?? null,
+      provider,
+      source,
+      status,
+    },
+    null,
+    2,
+  );
+}
+
 function parseStoredConnections(user: User | null) {
   const rawConnections =
     isRecord(user?.user_metadata) && "connections" in user.user_metadata
@@ -155,45 +217,23 @@ function parseStoredConnections(user: User | null) {
       return { status: "idle" };
     }
 
-    const status =
-      "status" in candidate &&
-      (candidate.status === "connected" ||
-        candidate.status === "error" ||
-        candidate.status === "idle" ||
-        candidate.status === "loading")
-        ? candidate.status
-        : "idle";
-
-    const profile =
-      "profile" in candidate &&
-      isRecord(candidate.profile)
-        ? {
-            handle:
-              "handle" in candidate.profile && typeof candidate.profile.handle === "string"
-                ? candidate.profile.handle
-                : null,
-            id:
-              "id" in candidate.profile && typeof candidate.profile.id === "string"
-                ? candidate.profile.id
-                : null,
-            imageUrl:
-              "imageUrl" in candidate.profile &&
-              typeof candidate.profile.imageUrl === "string"
-                ? candidate.profile.imageUrl
-                : null,
-            name:
-              "name" in candidate.profile && typeof candidate.profile.name === "string"
-                ? candidate.profile.name
-                : null,
-          }
-        : undefined;
-
+    const connectedAt = getOptionalString(candidate.connectedAt);
+    const status = getConnectionStatus(candidate.status);
+    const profile = parseConnectionProfile(candidate.profile);
     const payload =
-      "payload" in candidate && typeof candidate.payload === "string"
-        ? candidate.payload
-        : undefined;
+      getOptionalString(candidate.payload) ??
+      (status === "connected"
+        ? buildConnectionPayload({
+            connectedAt,
+            profile,
+            provider,
+            source: "supabase_user_metadata",
+            status,
+          })
+        : undefined);
 
     return {
+      connectedAt,
       payload,
       profile,
       status,
@@ -206,15 +246,55 @@ function parseStoredConnections(user: User | null) {
   };
 }
 
+function parsePersistedConnections(value: unknown) {
+  const fallback = {
+    tiktok: { status: "idle" } as ConnectionState,
+    x: { status: "idle" } as ConnectionState,
+  };
+
+  if (!isRecord(value) || !isRecord(value.connections)) {
+    return fallback;
+  }
+
+  const rawConnections = value.connections;
+
+  const parseConnection = (provider: ProviderKey): ConnectionState => {
+    const candidate = rawConnections[provider];
+
+    if (!isRecord(candidate)) {
+      return { status: "idle" };
+    }
+
+    const connectedAt = getOptionalString(candidate.connectedAt);
+    const status = getConnectionStatus(candidate.status);
+    const profile = parseConnectionProfile(candidate.profile);
+
+    return {
+      connectedAt,
+      payload:
+        status === "connected"
+          ? buildConnectionPayload({
+              connectedAt,
+              profile,
+              provider,
+              source: "supabase_social_connections",
+              status,
+            })
+          : undefined,
+      profile,
+      status,
+    };
+  };
+
+  return {
+    tiktok: parseConnection("tiktok"),
+    x: parseConnection("x"),
+  };
+}
+
 function mergeStoredConnections(
-  current: {
-    tiktok: ConnectionState;
-    x: ConnectionState;
-  },
-  stored: {
-    tiktok: ConnectionState;
-    x: ConnectionState;
-  },
+  current: ConnectionsState,
+  stored: ConnectionsState,
 ) {
   const keepFreshConnection = (
     provider: ProviderKey,
@@ -229,6 +309,41 @@ function mergeStoredConnections(
         ? current.tiktok
         : keepFreshConnection("tiktok"),
     x: current.x.status === "loading" ? current.x : keepFreshConnection("x"),
+  };
+}
+
+function markConnectionsLoading(current: ConnectionsState): ConnectionsState {
+  return {
+    tiktok:
+      current.tiktok.status === "connected"
+        ? current.tiktok
+        : { ...current.tiktok, status: "loading" },
+    x:
+      current.x.status === "connected"
+        ? current.x
+        : { ...current.x, status: "loading" },
+  };
+}
+
+function mergeFetchedConnections(
+  current: ConnectionsState,
+  fetched: ConnectionsState,
+): ConnectionsState {
+  const mergeProvider = (provider: ProviderKey): ConnectionState => {
+    if (fetched[provider].status === "connected") {
+      return fetched[provider];
+    }
+
+    if (current[provider].status === "loading") {
+      return { status: "idle" };
+    }
+
+    return current[provider];
+  };
+
+  return {
+    tiktok: mergeProvider("tiktok"),
+    x: mergeProvider("x"),
   };
 }
 
@@ -340,10 +455,7 @@ export function AcreExperience({
   const [authPending, setAuthPending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [viewer, setViewer] = useState<Viewer>(initialUser);
-  const [connections, setConnections] = useState<{
-    tiktok: ConnectionState;
-    x: ConnectionState;
-  }>({
+  const [connections, setConnections] = useState<ConnectionsState>({
     tiktok: { status: "idle" },
     x: { status: "idle" },
   });
@@ -392,6 +504,74 @@ export function AcreExperience({
       subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase || !viewer?.id) {
+      return;
+    }
+
+    let cancelled = false;
+    const supabaseClient = supabase;
+
+    async function loadPersistedConnections() {
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession();
+
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        return;
+      }
+
+      if (!cancelled) {
+        setConnections(markConnectionsLoading);
+      }
+
+      try {
+        const response = await fetch(`${backendBaseUrl}/api/auth/connections`, {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const json: unknown = await response.json().catch(() => ({
+          error: "Saved connection lookup returned a non-JSON response.",
+        }));
+
+        if (!response.ok) {
+          const message =
+            isRecord(json) && typeof json.error === "string"
+              ? json.error
+              : "Unable to load saved provider connections.";
+          throw new Error(message);
+        }
+
+        if (!cancelled) {
+          setConnections((current) =>
+            mergeFetchedConnections(current, parsePersistedConnections(json)),
+          );
+        }
+      } catch (error) {
+        console.error("Unable to load saved provider connections", error);
+
+        if (!cancelled) {
+          setConnections((current) =>
+            mergeFetchedConnections(current, {
+              tiktok: { status: "idle" },
+              x: { status: "idle" },
+            }),
+          );
+        }
+      }
+    }
+
+    void loadPersistedConnections();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backendBaseUrl, supabase, viewer?.id]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -470,6 +650,10 @@ export function AcreExperience({
     }
 
     setViewer(null);
+    setConnections({
+      tiktok: { status: "idle" },
+      x: { status: "idle" },
+    });
     setActiveScreen("dashboard");
     setAuthPending(false);
   }
@@ -661,7 +845,10 @@ export function AcreExperience({
                 </span>
               </div>
               <pre className="json-box mono">
-                {connections.tiktok.payload ?? "Connect TikTok to load live profile data here."}
+                {connections.tiktok.payload ??
+                  (connections.tiktok.status === "loading"
+                    ? "Checking saved TikTok connection data..."
+                    : "Connect TikTok to load live profile data here.")}
               </pre>
             </div>
 
@@ -673,7 +860,10 @@ export function AcreExperience({
                 </span>
               </div>
               <pre className="json-box mono">
-                {connections.x.payload ?? "Connect X to load live profile data here."}
+                {connections.x.payload ??
+                  (connections.x.status === "loading"
+                    ? "Checking saved X connection data..."
+                    : "Connect X to load live profile data here.")}
               </pre>
             </div>
           </div>
