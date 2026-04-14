@@ -502,14 +502,6 @@ export function AcreExperience({
 
       <div className="acre-main">
         <header className="app-header">
-          <button
-            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-            className="mobile-menu-button"
-            onClick={() => setSidebarOpen((open) => !open)}
-            type="button"
-          >
-            Menu
-          </button>
           <div className="header-copy-block">
             <p className="eyebrow">{activeMeta.eyebrow}</p>
             <h1>{activeMeta.title}</h1>

@@ -174,7 +174,6 @@ input {
 }
 
 .sidebar-toggle,
-.mobile-menu-button,
 .signin-button {
   cursor: pointer;
   transition:
@@ -218,7 +217,6 @@ input {
 
 .sidebar-link:hover,
 .sidebar-toggle:hover,
-.mobile-menu-button:hover,
 .signin-button:hover {
   transform: translateY(-1px);
 }
@@ -313,11 +311,9 @@ input {
   border-radius: 30px;
   display: grid;
   gap: 18px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   margin-bottom: 20px;
   padding: 18px;
-  position: sticky;
-  top: 20px;
   z-index: 8;
 }
 
@@ -343,18 +339,11 @@ input {
   justify-content: end;
 }
 
-.mobile-menu-button,
 .signin-button {
   border-radius: 16px;
   font-weight: 800;
   min-height: 44px;
   padding: 0 16px;
-}
-
-.mobile-menu-button {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text);
 }
 
 .signin-button {
