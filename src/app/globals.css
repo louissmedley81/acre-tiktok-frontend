@@ -229,10 +229,18 @@ input {
 .sidebar-icon {
   background: rgba(255, 255, 255, 0.06);
   color: var(--lime);
-  font-size: 0.72rem;
   height: 42px;
-  letter-spacing: 0.08em;
   width: 42px;
+}
+
+.sidebar-icon svg {
+  height: 22px;
+  width: 22px;
+}
+
+.sidebar-link.active .sidebar-icon {
+  background: rgba(142, 255, 107, 0.14);
+  color: var(--lime-strong);
 }
 
 .sidebar-label {
@@ -745,6 +753,11 @@ input {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
   color: var(--muted);
+}
+
+.viewer-pill {
+  letter-spacing: 0.08em;
+  text-transform: none;
 }
 
 .connection-pill.idle {

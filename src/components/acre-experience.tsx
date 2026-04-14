@@ -11,6 +11,8 @@ type InitialUser = {
 
 type Screen = "campaigns" | "dashboard" | "oauth" | "upload";
 
+type NavIcon = "campaigns" | "dashboard" | "link" | "submit";
+
 type Viewer = {
   email: string | null;
   id: string;
@@ -36,15 +38,15 @@ type Props = {
 };
 
 const navItems: Array<{
-  icon: string;
+  icon: NavIcon;
   key: Screen;
   label: string;
   note: string;
 }> = [
-  { icon: "DB", key: "dashboard", label: "Dashboard", note: "Overview" },
-  { icon: "LC", key: "oauth", label: "Link Channels", note: "TikTok + X" },
-  { icon: "CP", key: "campaigns", label: "Campaigns", note: "Active briefs" },
-  { icon: "SB", key: "upload", label: "Submit", note: "Content links" },
+  { icon: "dashboard", key: "dashboard", label: "Dashboard", note: "Overview" },
+  { icon: "link", key: "oauth", label: "Link Channels", note: "TikTok + X" },
+  { icon: "campaigns", key: "campaigns", label: "Campaigns", note: "Active briefs" },
+  { icon: "submit", key: "upload", label: "Submit", note: "Content links" },
 ];
 
 const screenMeta: Record<
@@ -241,6 +243,28 @@ function formatViewer(user: User | Viewer): Viewer {
   };
 }
 
+function formatViewerName(viewer: Viewer) {
+  if (!viewer?.email) {
+    return "guest";
+  }
+
+  const emailName = viewer.email.split("@")[0] ?? "";
+  const cleanedName = emailName
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\d+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .trim();
+
+  if (!cleanedName) {
+    return "guest";
+  }
+
+  return cleanedName
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 function buildVerifiedConnectionState(provider: ProviderKey): ConnectionState {
   return {
     payload: JSON.stringify(
@@ -255,6 +279,55 @@ function buildVerifiedConnectionState(provider: ProviderKey): ConnectionState {
     ),
     status: "connected",
   };
+}
+
+function SidebarIcon({ icon }: { icon: NavIcon }) {
+  const commonProps = {
+    "aria-hidden": true,
+    fill: "none",
+    stroke: "currentColor",
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    strokeWidth: 1.8,
+    viewBox: "0 0 24 24",
+  };
+
+  switch (icon) {
+    case "campaigns":
+      return (
+        <svg {...commonProps}>
+          <path d="M4 13.5V9.75c0-.7.48-1.31 1.16-1.47l8.74-2.1v10.9l-8.74-2.1A1.51 1.51 0 0 1 4 13.5Z" />
+          <path d="M13.9 8.4h1.7a4 4 0 0 1 0 6.4h-1.7" />
+          <path d="m7.2 15.4 1.16 3.5c.18.53.68.9 1.24.9h1.85" />
+        </svg>
+      );
+    case "dashboard":
+      return (
+        <svg {...commonProps}>
+          <path d="M4.5 13.5a7.5 7.5 0 0 1 15 0" />
+          <path d="M12 13.5 16.2 8.8" />
+          <path d="M7.2 18.5h9.6" />
+          <path d="M6.4 13.5h1.2" />
+          <path d="M16.4 13.5h1.2" />
+          <path d="M8.1 9.6 7.25 8.8" />
+        </svg>
+      );
+    case "link":
+      return (
+        <svg {...commonProps}>
+          <path d="M9.4 14.6 14.6 9.4" />
+          <path d="M8.6 10.9 6.8 12.7a3.7 3.7 0 1 0 5.2 5.2l1.8-1.8" />
+          <path d="m10.2 7.9 1.8-1.8a3.7 3.7 0 1 1 5.2 5.2l-1.8 1.8" />
+        </svg>
+      );
+    case "submit":
+      return (
+        <svg {...commonProps}>
+          <path d="M5 12.5 19 5l-4.2 14-3.1-5.6L5 12.5Z" />
+          <path d="m11.7 13.4 3.7-3.7" />
+        </svg>
+      );
+  }
 }
 
 export function AcreExperience({
@@ -447,6 +520,7 @@ export function AcreExperience({
   }
 
   const activeMeta = screenMeta[activeScreen];
+  const viewerName = formatViewerName(viewer);
 
   return (
     <main className={sidebarOpen ? "acre-app sidebar-open" : "acre-app sidebar-collapsed"}>
@@ -474,11 +548,15 @@ export function AcreExperience({
           {navItems.map((item) => (
             <button
               key={item.key}
+              aria-label={item.label}
               className={item.key === activeScreen ? "sidebar-link active" : "sidebar-link"}
               onClick={() => setActiveScreen(item.key)}
+              title={item.label}
               type="button"
             >
-              <span className="sidebar-icon mono">{item.icon}</span>
+              <span className="sidebar-icon">
+                <SidebarIcon icon={item.icon} />
+              </span>
               <span className="sidebar-label">
                 <strong>{item.label}</strong>
                 <small>{item.note}</small>
@@ -508,7 +586,16 @@ export function AcreExperience({
             <p>{activeMeta.summary}</p>
           </div>
           <div className="header-actions">
-            <span className="status-pill mono">{viewer ? "signed in" : "guest"}</span>
+            <span
+              className={
+                viewer
+                  ? "status-pill viewer-pill mono"
+                  : "status-pill status-pill-muted viewer-pill mono"
+              }
+              title={viewer?.email ?? "Not signed in"}
+            >
+              {viewerName}
+            </span>
             <button
               className="signin-button"
               disabled={authPending}
