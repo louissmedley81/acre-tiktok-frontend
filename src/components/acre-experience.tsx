@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
@@ -13,9 +13,16 @@ type Screen = "campaigns" | "dashboard" | "oauth" | "upload";
 
 type NavIcon = "campaigns" | "dashboard" | "link" | "submit";
 
+type AuthMethod = "email" | "phone";
+type AuthModalMode = "signin" | "signup";
+type AuthStep = "email-sent" | "entry" | "sms-code";
+
 type Viewer = {
+  avatarUrl?: string | null;
   email: string | null;
   id: string;
+  name?: string | null;
+  phone?: string | null;
 } | null;
 
 type ProviderKey = "tiktok" | "x";
@@ -347,37 +354,88 @@ function mergeFetchedConnections(
   };
 }
 
+function getMetadataString(
+  metadata: Record<string, unknown>,
+  keys: string[],
+) {
+  for (const key of keys) {
+    const value = metadata[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function formatViewer(user: User | Viewer): Viewer {
   if (!user) {
     return null;
   }
 
+  const metadata =
+    "user_metadata" in user && isRecord(user.user_metadata)
+      ? user.user_metadata
+      : {};
+
   return {
+    avatarUrl: getMetadataString(metadata, ["avatar_url", "picture", "avatarUrl"]),
     email: user.email ?? null,
     id: user.id,
+    name: getMetadataString(metadata, [
+      "full_name",
+      "name",
+      "preferred_username",
+      "user_name",
+    ]),
+    phone: "phone" in user && typeof user.phone === "string" ? user.phone : null,
   };
 }
 
 function formatViewerName(viewer: Viewer) {
-  if (!viewer?.email) {
-    return "guest";
+  if (!viewer) {
+    return "Creator";
   }
 
-  const emailName = viewer.email.split("@")[0] ?? "";
+  if (viewer.name) {
+    return viewer.name;
+  }
+
+  const emailName = viewer.email?.split("@")[0] ?? "";
   const cleanedName = emailName
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\d+/g, " ")
     .replace(/[._-]+/g, " ")
     .trim();
 
-  if (!cleanedName) {
-    return "guest";
+  if (cleanedName) {
+    return cleanedName
+      .split(/\s+/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(" ");
   }
 
-  return cleanedName
+  return viewer.phone ?? "Creator";
+}
+
+function getViewerInitials(viewer: Viewer) {
+  const label = formatViewerName(viewer);
+  const parts = label
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .trim()
     .split(/\s+/)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return "A";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
 function buildVerifiedConnectionState(provider: ProviderKey): ConnectionState {
@@ -451,8 +509,14 @@ export function AcreExperience({
   supabaseReady,
 }: Props) {
   const [activeScreen, setActiveScreen] = useState<Screen>("dashboard");
+  const [authCode, setAuthCode] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authMethod, setAuthMethod] = useState<AuthMethod>("email");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode | null>(null);
   const [authPending, setAuthPending] = useState(false);
+  const [authPhone, setAuthPhone] = useState("");
+  const [authStep, setAuthStep] = useState<AuthStep>("entry");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [viewer, setViewer] = useState<Viewer>(initialUser);
   const [connections, setConnections] = useState<ConnectionsState>({
@@ -480,6 +544,11 @@ export function AcreExperience({
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setViewer(formatViewer(session?.user ?? null));
+      if (session?.user) {
+        setAuthModalMode(null);
+        setAuthMessage(null);
+        setAuthStep("entry");
+      }
       setConnections((current) => {
         const stored = parseStoredConnections(session?.user ?? null);
         return mergeStoredConnections(current, stored);
@@ -605,8 +674,35 @@ export function AcreExperience({
     }
   }, []);
 
+  function openAuthModal(mode: AuthModalMode) {
+    setAuthModalMode(mode);
+    setAuthMethod("email");
+    setAuthStep("entry");
+    setAuthCode("");
+    setAuthMessage(null);
+  }
+
+  function closeAuthModal() {
+    if (authPending) {
+      return;
+    }
+
+    setAuthModalMode(null);
+    setAuthMessage(null);
+    setAuthStep("entry");
+    setAuthCode("");
+  }
+
+  function switchAuthMethod(method: AuthMethod) {
+    setAuthMethod(method);
+    setAuthStep("entry");
+    setAuthCode("");
+    setAuthMessage(null);
+  }
+
   async function handleGoogleSignIn() {
     if (!supabase) {
+      setAuthModalMode((mode) => mode ?? "signin");
       setAuthMessage(
         "Add your Supabase URL and publishable key to enable Google sign-in.",
       );
@@ -631,6 +727,107 @@ export function AcreExperience({
       setAuthMessage(error.message);
       setAuthPending(false);
     }
+  }
+
+  async function handleEmailSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!supabase) {
+      setAuthMessage("Add your Supabase keys to enable email authentication.");
+      return;
+    }
+
+    const email = authEmail.trim();
+
+    if (!email) {
+      setAuthMessage("Enter an email address to continue.");
+      return;
+    }
+
+    setAuthPending(true);
+    setAuthMessage(null);
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/client-callback?next=/`,
+        shouldCreateUser: authModalMode === "signup",
+      },
+    });
+
+    if (error) {
+      setAuthMessage(error.message);
+      setAuthPending(false);
+      return;
+    }
+
+    setAuthStep("email-sent");
+    setAuthMessage(`Check ${email} for your secure sign-in link.`);
+    setAuthPending(false);
+  }
+
+  async function handlePhoneSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!supabase) {
+      setAuthMessage("Add your Supabase keys to enable phone authentication.");
+      return;
+    }
+
+    const phone = authPhone.trim();
+
+    if (!phone) {
+      setAuthMessage("Enter a phone number with country code, like +15555555555.");
+      return;
+    }
+
+    setAuthPending(true);
+    setAuthMessage(null);
+
+    if (authStep === "sms-code") {
+      const token = authCode.trim();
+
+      if (!token) {
+        setAuthMessage("Enter the verification code from your text message.");
+        setAuthPending(false);
+        return;
+      }
+
+      const { error } = await supabase.auth.verifyOtp({
+        phone,
+        token,
+        type: "sms",
+      });
+
+      if (error) {
+        setAuthMessage(error.message);
+        setAuthPending(false);
+        return;
+      }
+
+      setAuthModalMode(null);
+      setAuthStep("entry");
+      setAuthCode("");
+      setAuthPending(false);
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      phone,
+      options: {
+        shouldCreateUser: authModalMode === "signup",
+      },
+    });
+
+    if (error) {
+      setAuthMessage(error.message);
+      setAuthPending(false);
+      return;
+    }
+
+    setAuthStep("sms-code");
+    setAuthMessage(`We sent a verification code to ${phone}.`);
+    setAuthPending(false);
   }
 
   async function handleSignOut() {
@@ -705,6 +902,7 @@ export function AcreExperience({
 
   const activeMeta = screenMeta[activeScreen];
   const viewerName = formatViewerName(viewer);
+  const viewerInitials = getViewerInitials(viewer);
 
   return (
     <main className={sidebarOpen ? "acre-app sidebar-open" : "acre-app sidebar-collapsed"}>
@@ -770,24 +968,45 @@ export function AcreExperience({
             <p>{activeMeta.summary}</p>
           </div>
           <div className="header-actions">
-            <span
-              className={
-                viewer
-                  ? "status-pill viewer-pill mono"
-                  : "status-pill status-pill-muted viewer-pill mono"
-              }
-              title={viewer?.email ?? "Not signed in"}
-            >
-              {viewerName}
-            </span>
-            <button
-              className="signin-button"
-              disabled={authPending}
-              onClick={viewer ? handleSignOut : handleGoogleSignIn}
-              type="button"
-            >
-              {authPending ? "Working..." : viewer ? "Sign out" : "Sign in"}
-            </button>
+            {viewer ? (
+              <button
+                aria-label={`Signed in as ${viewerName}. Click to sign out.`}
+                className="profile-button"
+                disabled={authPending}
+                onClick={handleSignOut}
+                title={`Signed in as ${viewerName}. Click to sign out.`}
+                type="button"
+              >
+                {viewer.avatarUrl ? (
+                  <span
+                    aria-hidden="true"
+                    className="profile-avatar-image"
+                    style={{ backgroundImage: `url(${viewer.avatarUrl})` }}
+                  />
+                ) : (
+                  <span className="profile-initials">{viewerInitials}</span>
+                )}
+              </button>
+            ) : (
+              <div className="auth-button-row" aria-label="Account actions">
+                <button
+                  className="auth-top-button auth-top-button-primary"
+                  disabled={authPending}
+                  onClick={() => openAuthModal("signin")}
+                  type="button"
+                >
+                  Log in
+                </button>
+                <button
+                  className="auth-top-button auth-top-button-secondary"
+                  disabled={authPending}
+                  onClick={() => openAuthModal("signup")}
+                  type="button"
+                >
+                  Sign up
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -797,7 +1016,9 @@ export function AcreExperience({
             setup mode until the public env vars are available.
           </div>
         )}
-        {authMessage && <div className="inline-note inline-note-error">{authMessage}</div>}
+        {authMessage && !authModalMode && (
+          <div className="inline-note inline-note-error">{authMessage}</div>
+        )}
 
         <section className={activeScreen === "oauth" ? "screen active" : "screen"}>
         <div className="oauth-grid">
@@ -1030,6 +1251,158 @@ export function AcreExperience({
         </div>
         </section>
       </div>
+
+      {authModalMode && (
+        <div className="auth-modal-backdrop">
+          <section
+            aria-labelledby="auth-modal-title"
+            aria-modal="true"
+            className="auth-modal"
+            role="dialog"
+          >
+            <button
+              aria-label="Close authentication modal"
+              className="auth-close-button"
+              disabled={authPending}
+              onClick={closeAuthModal}
+              type="button"
+            >
+              x
+            </button>
+
+            <div className="auth-modal-copy">
+              <h2 id="auth-modal-title">Log in or sign up</h2>
+              <p>
+                Save your channels, submissions, and campaign progress with your
+                ACRE account.
+              </p>
+            </div>
+
+            <div className="auth-option-stack">
+              <button
+                className="auth-option-button"
+                disabled={authPending}
+                onClick={() => void handleGoogleSignIn()}
+                type="button"
+              >
+                <span className="auth-provider-icon google-icon" aria-hidden="true">
+                  G
+                </span>
+                <span>Continue with Google</span>
+              </button>
+
+              <button
+                className={
+                  authMethod === "phone"
+                    ? "auth-option-button active"
+                    : "auth-option-button"
+                }
+                disabled={authPending}
+                onClick={() => switchAuthMethod("phone")}
+                type="button"
+              >
+                <span className="auth-provider-icon" aria-hidden="true">
+                  <svg fill="none" viewBox="0 0 24 24">
+                    <path d="M8 4.5h8a1.5 1.5 0 0 1 1.5 1.5v12A1.5 1.5 0 0 1 16 19.5H8A1.5 1.5 0 0 1 6.5 18V6A1.5 1.5 0 0 1 8 4.5Z" />
+                    <path d="M10.5 16.5h3" />
+                  </svg>
+                </span>
+                <span>Continue with phone</span>
+              </button>
+
+              {authMethod === "phone" && (
+                <button
+                  className="auth-option-button"
+                  disabled={authPending}
+                  onClick={() => switchAuthMethod("email")}
+                  type="button"
+                >
+                  <span className="auth-provider-icon" aria-hidden="true">
+                    @
+                  </span>
+                  <span>Continue with email</span>
+                </button>
+              )}
+            </div>
+
+            <div className="auth-divider">
+              <span>OR</span>
+            </div>
+
+            {authMethod === "phone" ? (
+              <form className="auth-form" onSubmit={(event) => void handlePhoneSubmit(event)}>
+                <input
+                  className="auth-text-field"
+                  disabled={authPending || authStep === "sms-code"}
+                  inputMode="tel"
+                  onChange={(event) => setAuthPhone(event.target.value)}
+                  placeholder="+15555555555"
+                  type="tel"
+                  value={authPhone}
+                />
+                {authStep === "sms-code" && (
+                  <input
+                    className="auth-text-field"
+                    disabled={authPending}
+                    inputMode="numeric"
+                    onChange={(event) => setAuthCode(event.target.value)}
+                    placeholder="Verification code"
+                    type="text"
+                    value={authCode}
+                  />
+                )}
+                <button
+                  className="auth-submit-button"
+                  disabled={authPending}
+                  type="submit"
+                >
+                  {authPending
+                    ? "Working..."
+                    : authStep === "sms-code"
+                      ? "Verify code"
+                      : "Continue"}
+                </button>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={(event) => void handleEmailSubmit(event)}>
+                <input
+                  className="auth-text-field"
+                  disabled={authPending}
+                  inputMode="email"
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="Email address"
+                  type="email"
+                  value={authEmail}
+                />
+                <button
+                  className="auth-submit-button"
+                  disabled={authPending}
+                  type="submit"
+                >
+                  {authPending ? "Working..." : "Continue"}
+                </button>
+              </form>
+            )}
+
+            {authMessage && <p className="auth-modal-message">{authMessage}</p>}
+
+            <p className="auth-mode-switch">
+              {authModalMode === "signin"
+                ? "New to ACRE?"
+                : "Already have an account?"}
+              <button
+                disabled={authPending}
+                onClick={() =>
+                  openAuthModal(authModalMode === "signin" ? "signup" : "signin")
+                }
+                type="button"
+              >
+                {authModalMode === "signin" ? "Sign up" : "Log in"}
+              </button>
+            </p>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
