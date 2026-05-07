@@ -797,6 +797,7 @@ input {
 .list-card,
 .balance-card,
 .chart-card,
+.empty-panel,
 .feed-card {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -1099,6 +1100,12 @@ input {
   gap: 12px;
 }
 
+.empty-panel {
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 18px;
+}
+
 .list-row,
 .feed-row {
   align-items: center;
@@ -1155,6 +1162,26 @@ input {
 
 .balance-card strong {
   font-size: 2.4rem;
+}
+
+.profile-summary-card strong {
+  font-size: 2rem;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.tag-pill {
+  background: rgba(142, 255, 107, 0.1);
+  border: 1px solid rgba(142, 255, 107, 0.18);
+  border-radius: 999px;
+  color: var(--lime);
+  display: inline-flex;
+  padding: 8px 12px;
 }
 
 @media (max-width: 1040px) {

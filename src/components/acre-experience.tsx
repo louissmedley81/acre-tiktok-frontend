@@ -27,14 +27,57 @@ type Viewer = {
 
 type ProviderKey = "tiktok" | "x";
 
+type TikTokRecentTotals = {
+  commentCount?: number | null;
+  likeCount?: number | null;
+  shareCount?: number | null;
+  viewCount?: number | null;
+};
+
+type TikTokVideoSnapshot = {
+  caption?: string | null;
+  commentCount?: number | null;
+  coverImageUrl?: string | null;
+  createdAt?: string | null;
+  durationSeconds?: number | null;
+  hashtags?: string[];
+  id?: string | null;
+  likeCount?: number | null;
+  shareCount?: number | null;
+  shareUrl?: string | null;
+  title?: string | null;
+  viewCount?: number | null;
+};
+
+type TikTokConnectionSnapshot = {
+  cursor?: number | null;
+  hasMore?: boolean | null;
+  recentTotals?: TikTokRecentTotals;
+  syncedAt?: string | null;
+  syncWarnings?: string[];
+  topHashtags?: string[];
+  videos?: TikTokVideoSnapshot[];
+};
+
+type ConnectionProfile = {
+  bioDescription?: string | null;
+  followerCount?: number | null;
+  followingCount?: number | null;
+  handle?: string | null;
+  id?: string | null;
+  imageUrl?: string | null;
+  isVerified?: boolean | null;
+  likesCount?: number | null;
+  name?: string | null;
+  profileDeepLink?: string | null;
+  snapshot?: TikTokConnectionSnapshot;
+  username?: string | null;
+  videoCount?: number | null;
+};
+
 type ConnectionState = {
   connectedAt?: string | null;
-  profile?: {
-    handle?: string | null;
-    id?: string | null;
-    imageUrl?: string | null;
-    name?: string | null;
-  };
+  profile?: ConnectionProfile;
   payload?: string;
   status: "connected" | "error" | "idle" | "loading";
 };
@@ -82,7 +125,7 @@ const screenMeta: Record<
   },
   oauth: {
     eyebrow: "Channels",
-    summary: "Connect TikTok and X so ACRE can attach future stats to your creator profile.",
+    summary: "Connect TikTok and X so ACRE can sync saved channel data into your creator profile.",
     title: "Link channels",
   },
   upload: {
@@ -146,6 +189,24 @@ function getOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function getOptionalNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getOptionalBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function getOptionalStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => getOptionalString(item))
+    .filter((item): item is string => Boolean(item));
+}
+
 function getConnectionStatus(value: unknown): ConnectionState["status"] {
   return value === "connected" ||
     value === "error" ||
@@ -162,14 +223,94 @@ function parseConnectionProfile(
     return undefined;
   }
 
+  const snapshotValue = isRecord(value.snapshot) ? value.snapshot : null;
+  const recentTotalsValue =
+    snapshotValue && isRecord(snapshotValue.recentTotals)
+      ? snapshotValue.recentTotals
+      : null;
+
+  const videos =
+    snapshotValue && Array.isArray(snapshotValue.videos)
+      ? snapshotValue.videos
+          .map((video) => {
+            if (!isRecord(video)) {
+              return null;
+            }
+
+            const parsedVideo: TikTokVideoSnapshot = {
+              caption: getOptionalString(video.caption),
+              commentCount: getOptionalNumber(video.commentCount),
+              coverImageUrl: getOptionalString(video.coverImageUrl),
+              createdAt: getOptionalString(video.createdAt),
+              durationSeconds: getOptionalNumber(video.durationSeconds),
+              hashtags: getOptionalStringArray(video.hashtags),
+              id: getOptionalString(video.id),
+              likeCount: getOptionalNumber(video.likeCount),
+              shareCount: getOptionalNumber(video.shareCount),
+              shareUrl: getOptionalString(video.shareUrl),
+              title: getOptionalString(video.title),
+              viewCount: getOptionalNumber(video.viewCount),
+            };
+
+            return Object.values(parsedVideo).some((entry) =>
+              Array.isArray(entry) ? entry.length > 0 : entry !== null,
+            )
+              ? parsedVideo
+              : null;
+          })
+          .filter((video): video is TikTokVideoSnapshot => video !== null)
+      : [];
+
+  const snapshot = snapshotValue
+    ? {
+        cursor: getOptionalNumber(snapshotValue.cursor),
+        hasMore: getOptionalBoolean(snapshotValue.hasMore),
+        recentTotals: recentTotalsValue
+          ? {
+              commentCount: getOptionalNumber(recentTotalsValue.commentCount),
+              likeCount: getOptionalNumber(recentTotalsValue.likeCount),
+              shareCount: getOptionalNumber(recentTotalsValue.shareCount),
+              viewCount: getOptionalNumber(recentTotalsValue.viewCount),
+            }
+          : undefined,
+        syncedAt: getOptionalString(snapshotValue.syncedAt),
+        syncWarnings: getOptionalStringArray(snapshotValue.syncWarnings),
+        topHashtags: getOptionalStringArray(snapshotValue.topHashtags),
+        videos,
+      }
+    : undefined;
+
   const profile = {
+    bioDescription: getOptionalString(value.bioDescription),
+    followerCount: getOptionalNumber(value.followerCount),
+    followingCount: getOptionalNumber(value.followingCount),
     handle: getOptionalString(value.handle),
     id: getOptionalString(value.id),
     imageUrl: getOptionalString(value.imageUrl),
+    isVerified: getOptionalBoolean(value.isVerified),
+    likesCount: getOptionalNumber(value.likesCount),
     name: getOptionalString(value.name),
+    profileDeepLink: getOptionalString(value.profileDeepLink),
+    snapshot,
+    username: getOptionalString(value.username),
+    videoCount: getOptionalNumber(value.videoCount),
   };
 
-  return Object.values(profile).some(Boolean) ? profile : undefined;
+  return Object.values(profile).some((entry) => {
+    if (Array.isArray(entry)) {
+      return entry.length > 0;
+    }
+
+    if (isRecord(entry)) {
+      return Object.values(entry).some((nestedValue) =>
+        Array.isArray(nestedValue) ? nestedValue.length > 0 : nestedValue !== null,
+      );
+    }
+
+    return entry !== null && entry !== undefined;
+  })
+    ? profile
+    : undefined;
 }
 
 function buildConnectionPayload({
@@ -259,24 +400,29 @@ function parsePersistedConnections(value: unknown) {
     x: { status: "idle" } as ConnectionState,
   };
 
-  if (!isRecord(value) || !isRecord(value.connections)) {
+  if (!Array.isArray(value)) {
     return fallback;
   }
 
-  const rawConnections = value.connections;
-
-  const parseConnection = (provider: ProviderKey): ConnectionState => {
-    const candidate = rawConnections[provider];
-
-    if (!isRecord(candidate)) {
-      return { status: "idle" };
+  for (const row of value) {
+    if (!isRecord(row)) {
+      continue;
     }
 
-    const connectedAt = getOptionalString(candidate.connectedAt);
-    const status = getConnectionStatus(candidate.status);
-    const profile = parseConnectionProfile(candidate.profile);
+    const provider =
+      row.provider === "tiktok" || row.provider === "x"
+        ? row.provider
+        : null;
 
-    return {
+    if (!provider || fallback[provider].status === "connected") {
+      continue;
+    }
+
+    const connectedAt = getOptionalString(row.connected_at);
+    const status = getConnectionStatus(row.status);
+    const profile = parseConnectionProfile(row.profile);
+
+    fallback[provider] = {
       connectedAt,
       payload:
         status === "connected"
@@ -291,12 +437,57 @@ function parsePersistedConnections(value: unknown) {
       profile,
       status,
     };
-  };
+  }
 
-  return {
-    tiktok: parseConnection("tiktok"),
-    x: parseConnection("x"),
-  };
+  return fallback;
+}
+
+function formatCompactNumber(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+    notation: value >= 1000 ? "compact" : "standard",
+  }).format(value);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "Waiting for first sync";
+  }
+
+  const timestamp = Date.parse(value);
+
+  if (Number.isNaN(timestamp)) {
+    return "Waiting for first sync";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(timestamp);
+}
+
+function shouldRefreshTikTokSnapshot(connection: ConnectionState) {
+  if (connection.status !== "connected") {
+    return false;
+  }
+
+  const syncedAt = connection.profile?.snapshot?.syncedAt;
+
+  if (!syncedAt) {
+    return true;
+  }
+
+  const timestamp = Date.parse(syncedAt);
+
+  if (Number.isNaN(timestamp)) {
+    return true;
+  }
+
+  return Date.now() - timestamp >= 1000 * 60 * 30;
 }
 
 function mergeStoredConnections(
@@ -523,6 +714,14 @@ export function AcreExperience({
     tiktok: { status: "idle" },
     x: { status: "idle" },
   });
+  const [connectionRefreshKey, setConnectionRefreshKey] = useState(0);
+  const [lastTikTokSyncRequestKey, setLastTikTokSyncRequestKey] = useState<string | null>(
+    null,
+  );
+  const [tiktokSyncError, setTikTokSyncError] = useState<string | null>(null);
+  const [tiktokSyncState, setTikTokSyncState] = useState<
+    "error" | "idle" | "loading" | "success"
+  >("idle");
   const [supabase] = useState(() => {
     if (!supabaseReady) {
       return null;
@@ -583,46 +782,30 @@ export function AcreExperience({
     const supabaseClient = supabase;
 
     async function loadPersistedConnections() {
-      const {
-        data: { session },
-      } = await supabaseClient.auth.getSession();
-
-      const accessToken = session?.access_token;
-
-      if (!accessToken) {
-        return;
-      }
-
       if (!cancelled) {
         setConnections(markConnectionsLoading);
       }
 
       try {
-        const response = await fetch(`${backendBaseUrl}/api/auth/connections`, {
-          cache: "no-store",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const json: unknown = await response.json().catch(() => ({
-          error: "Saved connection lookup returned a non-JSON response.",
-        }));
+        const { data, error } = await supabaseClient
+          .from("social_connections")
+          .select(
+            "connected_at,profile,provider,provider_handle,provider_image_url,provider_name,provider_user_id,status",
+          )
+          .in("provider", ["tiktok", "x"])
+          .order("connected_at", { ascending: false });
 
-        if (!response.ok) {
-          const message =
-            isRecord(json) && typeof json.error === "string"
-              ? json.error
-              : "Unable to load saved provider connections.";
-          throw new Error(message);
+        if (error) {
+          throw error;
         }
 
         if (!cancelled) {
           setConnections((current) =>
-            mergeFetchedConnections(current, parsePersistedConnections(json)),
+            mergeFetchedConnections(current, parsePersistedConnections(data)),
           );
         }
       } catch (error) {
-        console.error("Unable to load saved provider connections", error);
+        console.error("Unable to load saved provider connections from Supabase", error);
 
         if (!cancelled) {
           setConnections((current) =>
@@ -640,7 +823,89 @@ export function AcreExperience({
     return () => {
       cancelled = true;
     };
-  }, [backendBaseUrl, supabase, viewer?.id]);
+  }, [connectionRefreshKey, supabase, viewer?.id]);
+
+  useEffect(() => {
+    if (!supabase || !viewer?.id || !shouldRefreshTikTokSnapshot(connections.tiktok)) {
+      return;
+    }
+
+    const syncKey = `${viewer.id}:${connections.tiktok.connectedAt ?? "connected"}:${
+      connections.tiktok.profile?.snapshot?.syncedAt ?? "unsynced"
+    }`;
+
+    if (lastTikTokSyncRequestKey === syncKey) {
+      return;
+    }
+
+    let cancelled = false;
+    const supabaseClient = supabase;
+
+    async function syncTikTokSnapshot() {
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession();
+
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        return;
+      }
+
+      setLastTikTokSyncRequestKey(syncKey);
+      setTikTokSyncError(null);
+      setTikTokSyncState("loading");
+
+      try {
+        const response = await fetch(`${backendBaseUrl}/api/tiktok-me`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const json: unknown = await response.json().catch(() => ({
+          error: "TikTok sync returned a non-JSON response.",
+        }));
+
+        if (!response.ok) {
+          const message =
+            isRecord(json) && typeof json.error === "string"
+              ? json.error
+              : "Unable to sync TikTok data into Supabase.";
+          throw new Error(message);
+        }
+
+        if (!cancelled) {
+          setTikTokSyncState("success");
+          setConnectionRefreshKey((current) => current + 1);
+        }
+      } catch (error) {
+        console.error("Unable to sync TikTok data", error);
+
+        if (!cancelled) {
+          setTikTokSyncState("error");
+          setTikTokSyncError(
+            error instanceof Error
+              ? error.message
+              : "Unable to sync TikTok data into Supabase.",
+          );
+        }
+      }
+    }
+
+    void syncTikTokSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    backendBaseUrl,
+    connections.tiktok,
+    lastTikTokSyncRequestKey,
+    supabase,
+    viewer?.id,
+  ]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -851,6 +1116,10 @@ export function AcreExperience({
       tiktok: { status: "idle" },
       x: { status: "idle" },
     });
+    setConnectionRefreshKey(0);
+    setLastTikTokSyncRequestKey(null);
+    setTikTokSyncError(null);
+    setTikTokSyncState("idle");
     setActiveScreen("dashboard");
     setAuthPending(false);
   }
@@ -901,6 +1170,80 @@ export function AcreExperience({
   }
 
   const activeMeta = screenMeta[activeScreen];
+  const tiktokProfile = connections.tiktok.profile;
+  const tiktokSnapshot = tiktokProfile?.snapshot;
+  const tiktokVideos = Array.isArray(tiktokSnapshot?.videos) ? tiktokSnapshot.videos : [];
+  const tiktokRecentTotals = tiktokSnapshot?.recentTotals;
+  const tiktokTopHashtags = Array.isArray(tiktokSnapshot?.topHashtags)
+    ? tiktokSnapshot.topHashtags
+    : [];
+  const tiktokSyncWarnings = Array.isArray(tiktokSnapshot?.syncWarnings)
+    ? tiktokSnapshot.syncWarnings
+    : [];
+  const hasTikTokConnection = connections.tiktok.status === "connected" && Boolean(tiktokProfile);
+  const hasTikTokSnapshot = hasTikTokConnection && Boolean(tiktokSnapshot);
+  const tiktokHandle = tiktokProfile?.handle ?? tiktokProfile?.username ?? null;
+  const recentEngagementRate =
+    tiktokRecentTotals?.viewCount && tiktokRecentTotals.viewCount > 0
+      ? (((tiktokRecentTotals.likeCount ?? 0) +
+          (tiktokRecentTotals.commentCount ?? 0) +
+          (tiktokRecentTotals.shareCount ?? 0)) /
+          tiktokRecentTotals.viewCount) *
+        100
+      : null;
+  const dashboardStats = hasTikTokConnection
+    ? [
+        {
+          label: "TikTok Followers",
+          note: tiktokProfile?.isVerified
+            ? "Verified TikTok account"
+            : "Follower count from your connected profile",
+          value: formatCompactNumber(tiktokProfile?.followerCount),
+        },
+        {
+          label: "Lifetime Likes",
+          note: tiktokHandle
+            ? `Saved from @${tiktokHandle}`
+            : "Saved from your connected TikTok profile",
+          value: formatCompactNumber(tiktokProfile?.likesCount),
+        },
+        {
+          label: "Recent Video Views",
+          note: hasTikTokSnapshot
+            ? `${tiktokVideos.length} videos saved into Supabase`
+            : "Run the TikTok sync once to pull recent posts",
+          value: formatCompactNumber(tiktokRecentTotals?.viewCount),
+        },
+        {
+          label: "Recent Engagement",
+          note: tiktokTopHashtags.length
+            ? `Top tag ${tiktokTopHashtags[0]}`
+            : "Hashtags are parsed from synced TikTok captions",
+          value:
+            typeof recentEngagementRate === "number" && Number.isFinite(recentEngagementRate)
+              ? `${recentEngagementRate.toFixed(1)}%`
+              : "—",
+        },
+      ]
+    : performanceStats;
+  const chartVideos = [...tiktokVideos]
+    .sort((left, right) => {
+      const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0;
+      const rightTime = right.createdAt ? Date.parse(right.createdAt) : 0;
+      return leftTime - rightTime;
+    })
+    .slice(-8);
+  const maxChartViews = chartVideos.reduce((highest, video) => {
+    const views = typeof video.viewCount === "number" ? video.viewCount : 0;
+    return views > highest ? views : highest;
+  }, 0);
+  const recentVideoRows = [...tiktokVideos]
+    .sort((left, right) => {
+      const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0;
+      const rightTime = right.createdAt ? Date.parse(right.createdAt) : 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 4);
   const viewerName = formatViewerName(viewer);
   const viewerInitials = getViewerInitials(viewer);
 
@@ -1027,7 +1370,8 @@ export function AcreExperience({
             <h3>Link your publishing channels</h3>
             <p className="section-copy">
               Connect the accounts you want ACRE to track. TikTok and X still run
-              through the hardened backend callback flow.
+              through the hardened backend callback flow, with TikTok snapshots
+              being saved back into Supabase for the dashboard.
             </p>
 
             <div className="provider-grid">
@@ -1176,7 +1520,7 @@ export function AcreExperience({
             <ul className="feature-list">
               <li>Use original edits and post from your linked account.</li>
               <li>Attach paid partnership labeling in the final caption.</li>
-              <li>Save content performance snapshots to Supabase in the next backend pass.</li>
+              <li>TikTok performance snapshots are now stored in Supabase after each sync.</li>
             </ul>
           </div>
         </div>
@@ -1189,12 +1533,26 @@ export function AcreExperience({
             <h3>Dashboard</h3>
           </div>
           <p className="section-copy">
-            A quick read on account performance, active posts, and payout movement.
+            TikTok profile metrics, recent videos, and parsed hashtags are saved into
+            Supabase and rendered here from that stored snapshot.
           </p>
         </div>
 
+        {tiktokSyncState === "loading" && (
+          <div className="inline-note">
+            Refreshing your TikTok snapshot and saving the latest videos, hashtags,
+            and stats into Supabase now.
+          </div>
+        )}
+        {tiktokSyncError && (
+          <div className="inline-note inline-note-error">{tiktokSyncError}</div>
+        )}
+        {tiktokSyncWarnings.length > 0 && (
+          <div className="inline-note">{tiktokSyncWarnings.join(" ")}</div>
+        )}
+
         <div className="stats-grid">
-          {performanceStats.map((stat) => (
+          {dashboardStats.map((stat) => (
             <article key={stat.label} className="stat-card">
               <span className="metric-label mono">{stat.label}</span>
               <strong>{stat.value}</strong>
@@ -1207,46 +1565,154 @@ export function AcreExperience({
           <div className="acre-panel">
             <div className="chart-card">
               <div className="chart-header">
-                <h4>Views over time</h4>
-                <span className="status-pill mono">hourly sync next</span>
+                <h4>{chartVideos.length > 0 ? "Recent TikTok video views" : "TikTok sync status"}</h4>
+                <span className="status-pill mono">
+                  {hasTikTokSnapshot ? "supabase snapshot" : "awaiting TikTok data"}
+                </span>
               </div>
-              <div className="chart-bars" aria-hidden="true">
-                {[35, 42, 38, 55, 68, 52, 78, 95, 85, 72, 88, 100, 90, 65].map((value) => (
-                  <span key={value} className="chart-bar" style={{ height: `${value}%` }} />
-                ))}
-              </div>
+              {chartVideos.length > 0 ? (
+                <div className="chart-bars" aria-hidden="true">
+                  {chartVideos.map((video, index) => {
+                    const views = typeof video.viewCount === "number" ? video.viewCount : 0;
+                    const height = maxChartViews > 0 ? Math.max(18, (views / maxChartViews) * 100) : 18;
+                    const label = video.title ?? video.caption ?? `TikTok video ${index + 1}`;
+
+                    return (
+                      <span
+                        key={video.id ?? `${label}-${index}`}
+                        className="chart-bar"
+                        style={{ height: `${height}%` }}
+                        title={`${label}: ${formatCompactNumber(views)} views`}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-panel">
+                  <p>
+                    {hasTikTokConnection
+                      ? "TikTok is connected. ACRE is waiting for the first saved video snapshot to land in Supabase."
+                      : "Connect TikTok from Link Channels and ACRE will pull recent videos, hashtags, and metrics into this dashboard."}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="feed-card">
-              <h4>Recent posts</h4>
-              {recentPosts.map(([title, views, earnings]) => (
-                <div key={title} className="feed-row">
-                  <div>
-                    <strong>{title}</strong>
-                    <p>{views}</p>
-                  </div>
-                  <span>{earnings}</span>
-                </div>
-              ))}
+              <h4>{recentVideoRows.length > 0 ? "Recent TikTok videos" : "Recent posts"}</h4>
+              {recentVideoRows.length > 0
+                ? recentVideoRows.map((video, index) => {
+                    const title = video.title ?? video.caption ?? `TikTok video ${index + 1}`;
+                    const views = formatCompactNumber(video.viewCount);
+                    const engagement = formatCompactNumber(
+                      (video.likeCount ?? 0) +
+                        (video.commentCount ?? 0) +
+                        (video.shareCount ?? 0),
+                    );
+
+                    return (
+                      <div key={video.id ?? `${title}-${index}`} className="feed-row">
+                        <div>
+                          <strong>{title}</strong>
+                          <p>
+                            {views} views
+                            {video.createdAt ? ` • ${formatDateTime(video.createdAt)}` : ""}
+                          </p>
+                        </div>
+                        <span>{engagement} engagements</span>
+                      </div>
+                    );
+                  })
+                : recentPosts.map(([title, views, earnings]) => (
+                    <div key={title} className="feed-row">
+                      <div>
+                        <strong>{title}</strong>
+                        <p>{views}</p>
+                      </div>
+                      <span>{earnings}</span>
+                    </div>
+                  ))}
             </div>
           </div>
 
           <div className="acre-panel">
-            <h4>Earnings and payouts</h4>
-            <div className="balance-card">
-              <span className="metric-label mono">Available balance</span>
-              <strong>$1,892.10</strong>
-              <p>Next payout target: Apr 28, 2026</p>
-            </div>
-            {payoutHistory.map(([date, status, amount]) => (
-              <div key={date} className="feed-row">
-                <div>
-                  <strong>{date}</strong>
-                  <p>{status}</p>
+            <h4>{hasTikTokConnection ? "TikTok profile snapshot" : "Earnings and payouts"}</h4>
+            {hasTikTokConnection ? (
+              <>
+                <div className="balance-card profile-summary-card">
+                  <span className="metric-label mono">Connected account</span>
+                  <strong>
+                    {tiktokHandle ? `@${tiktokHandle}` : tiktokProfile?.name ?? "TikTok connected"}
+                  </strong>
+                  <p>
+                    {tiktokProfile?.bioDescription ??
+                      "ACRE reads your TikTok data through the API, stores the snapshot in Supabase, and renders it here without relying on backend storage."}
+                  </p>
                 </div>
-                <span>{amount}</span>
-              </div>
-            ))}
+
+                <div className="feed-card">
+                  <div className="feed-row">
+                    <div>
+                      <strong>Display name</strong>
+                      <p>{tiktokProfile?.name ?? "TikTok creator"}</p>
+                    </div>
+                    <span>{tiktokProfile?.isVerified ? "Verified" : "Standard"}</span>
+                  </div>
+                  <div className="feed-row">
+                    <div>
+                      <strong>Following</strong>
+                      <p>Accounts this TikTok profile follows</p>
+                    </div>
+                    <span>{formatCompactNumber(tiktokProfile?.followingCount)}</span>
+                  </div>
+                  <div className="feed-row">
+                    <div>
+                      <strong>Videos on profile</strong>
+                      <p>Total video count reported by TikTok</p>
+                    </div>
+                    <span>{formatCompactNumber(tiktokProfile?.videoCount)}</span>
+                  </div>
+                  <div className="feed-row">
+                    <div>
+                      <strong>Last sync</strong>
+                      <p>Snapshot stored in Supabase</p>
+                    </div>
+                    <span>{formatDateTime(tiktokSnapshot?.syncedAt)}</span>
+                  </div>
+                </div>
+
+                {tiktokTopHashtags.length > 0 ? (
+                  <div className="tag-list">
+                    {tiktokTopHashtags.map((hashtag) => (
+                      <span key={hashtag} className="tag-pill mono">
+                        {hashtag}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="inline-note">
+                    Hashtags will appear here once TikTok captions have been synced into Supabase.
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="balance-card">
+                  <span className="metric-label mono">Available balance</span>
+                  <strong>$1,892.10</strong>
+                  <p>Next payout target: Apr 28, 2026</p>
+                </div>
+                {payoutHistory.map(([date, status, amount]) => (
+                  <div key={date} className="feed-row">
+                    <div>
+                      <strong>{date}</strong>
+                      <p>{status}</p>
+                    </div>
+                    <span>{amount}</span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </div>
         </section>
