@@ -1013,7 +1013,7 @@ export function AcreExperience({
           access_type: "offline",
           prompt: "consent",
         },
-        redirectTo: `${window.location.origin}/auth/client-callback?next=/`,
+        redirectTo: `${window.location.origin}/auth/callback?next=/`,
       },
     });
 
@@ -1044,7 +1044,7 @@ export function AcreExperience({
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/client-callback?next=/`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/`,
         shouldCreateUser: authModalMode === "signup",
       },
     });
