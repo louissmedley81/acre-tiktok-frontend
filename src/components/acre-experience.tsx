@@ -444,13 +444,37 @@ function parsePersistedConnections(value: unknown) {
 
 function formatCompactNumber(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "—";
+    return "Not available";
   }
 
   return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: value >= 1000 ? 1 : 0,
-    notation: value >= 1000 ? "compact" : "standard",
+    maximumFractionDigits: 0,
+    notation: "standard",
   }).format(value);
+}
+
+function hasMetricValue(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatPercentMetric(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "Not available";
+  }
+
+  return `${value.toFixed(1)}%`;
+}
+
+function getMetricNote({
+  available,
+  missing,
+  value,
+}: {
+  available: string;
+  missing: string;
+  value: number | null | undefined;
+}) {
+  return hasMetricValue(value) ? available : missing;
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -857,12 +881,17 @@ export function AcreExperience({
       setTikTokSyncState("loading");
 
       try {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 25000);
         const response = await fetch(`${backendBaseUrl}/api/tiktok-me`, {
           cache: "no-store",
           credentials: "include",
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
+          signal: controller.signal,
+        }).finally(() => {
+          window.clearTimeout(timeoutId);
         });
         const json: unknown = await response.json().catch(() => ({
           error: "TikTok sync returned a non-JSON response.",
@@ -1194,35 +1223,48 @@ export function AcreExperience({
   const dashboardStats = hasTikTokConnection
     ? [
         {
-          label: "TikTok Followers",
-          note: tiktokProfile?.isVerified
-            ? "Verified TikTok account"
-            : "Follower count from your connected profile",
+          label: "Follower count",
+          note: getMetricNote({
+            available: "TikTok returned follower_count for this connected profile.",
+            missing:
+              "TikTok has not returned follower_count for this token yet. Reconnect TikTok if this stays unavailable.",
+            value: tiktokProfile?.followerCount,
+          }),
           value: formatCompactNumber(tiktokProfile?.followerCount),
         },
         {
-          label: "Lifetime Likes",
-          note: tiktokHandle
-            ? `Saved from @${tiktokHandle}`
-            : "Saved from your connected TikTok profile",
+          label: "Like count",
+          note: getMetricNote({
+            available: tiktokHandle
+              ? `TikTok returned likes_count for @${tiktokHandle}.`
+              : "TikTok returned likes_count for this connected profile.",
+            missing:
+              "TikTok has not returned likes_count for this token yet. Reconnect TikTok if this stays unavailable.",
+            value: tiktokProfile?.likesCount,
+          }),
           value: formatCompactNumber(tiktokProfile?.likesCount),
         },
         {
-          label: "Recent Video Views",
-          note: hasTikTokSnapshot
-            ? `${tiktokVideos.length} videos saved into Supabase`
-            : "Run the TikTok sync once to pull recent posts",
+          label: "Recent view count",
+          note: getMetricNote({
+            available: `${tiktokVideos.length} synced videos saved into Supabase.`,
+            missing:
+              "TikTok has not returned view_count for recent videos yet.",
+            value: tiktokRecentTotals?.viewCount,
+          }),
           value: formatCompactNumber(tiktokRecentTotals?.viewCount),
         },
         {
-          label: "Recent Engagement",
-          note: tiktokTopHashtags.length
-            ? `Top tag ${tiktokTopHashtags[0]}`
-            : "Hashtags are parsed from synced TikTok captions",
-          value:
-            typeof recentEngagementRate === "number" && Number.isFinite(recentEngagementRate)
-              ? `${recentEngagementRate.toFixed(1)}%`
-              : "—",
+          label: "Recent engagement rate",
+          note: getMetricNote({
+            available: tiktokTopHashtags.length
+              ? `Calculated from synced likes, comments, shares, and views. Top hashtag: ${tiktokTopHashtags[0]}.`
+              : "Calculated from synced likes, comments, shares, and views.",
+            missing:
+              "Engagement rate needs synced like_count, comment_count, share_count, and view_count.",
+            value: recentEngagementRate,
+          }),
+          value: formatPercentMetric(recentEngagementRate),
         },
       ]
     : performanceStats;
