@@ -28,13 +28,21 @@ type Viewer = {
 type ProviderKey = "tiktok" | "x";
 
 type TikTokRecentTotals = {
+  bookmarkCount?: number | null;
   commentCount?: number | null;
+  engagementCount?: number | null;
+  engagementRate?: number | null;
+  impressionCount?: number | null;
   likeCount?: number | null;
+  quoteCount?: number | null;
+  replyCount?: number | null;
+  repostCount?: number | null;
   shareCount?: number | null;
   viewCount?: number | null;
 };
 
 type TikTokVideoSnapshot = {
+  bookmarkCount?: number | null;
   caption?: string | null;
   commentCount?: number | null;
   coverImageUrl?: string | null;
@@ -42,9 +50,14 @@ type TikTokVideoSnapshot = {
   durationSeconds?: number | null;
   hashtags?: string[];
   id?: string | null;
+  impressionCount?: number | null;
   likeCount?: number | null;
+  quoteCount?: number | null;
+  replyCount?: number | null;
+  repostCount?: number | null;
   shareCount?: number | null;
   shareUrl?: string | null;
+  text?: string | null;
   title?: string | null;
   viewCount?: number | null;
 };
@@ -52,6 +65,7 @@ type TikTokVideoSnapshot = {
 type TikTokConnectionSnapshot = {
   cursor?: number | null;
   hasMore?: boolean | null;
+  posts?: TikTokVideoSnapshot[];
   recentTotals?: TikTokRecentTotals;
   syncedAt?: string | null;
   syncWarnings?: string[];
@@ -228,47 +242,63 @@ function parseConnectionProfile(
     snapshotValue && isRecord(snapshotValue.recentTotals)
       ? snapshotValue.recentTotals
       : null;
-
-  const videos =
-    snapshotValue && Array.isArray(snapshotValue.videos)
-      ? snapshotValue.videos
-          .map((video) => {
-            if (!isRecord(video)) {
+  const parseContentSnapshots = (items: unknown): TikTokVideoSnapshot[] =>
+    Array.isArray(items)
+      ? items
+          .map((item) => {
+            if (!isRecord(item)) {
               return null;
             }
 
-            const parsedVideo: TikTokVideoSnapshot = {
-              caption: getOptionalString(video.caption),
-              commentCount: getOptionalNumber(video.commentCount),
-              coverImageUrl: getOptionalString(video.coverImageUrl),
-              createdAt: getOptionalString(video.createdAt),
-              durationSeconds: getOptionalNumber(video.durationSeconds),
-              hashtags: getOptionalStringArray(video.hashtags),
-              id: getOptionalString(video.id),
-              likeCount: getOptionalNumber(video.likeCount),
-              shareCount: getOptionalNumber(video.shareCount),
-              shareUrl: getOptionalString(video.shareUrl),
-              title: getOptionalString(video.title),
-              viewCount: getOptionalNumber(video.viewCount),
+            const parsedItem: TikTokVideoSnapshot = {
+              bookmarkCount: getOptionalNumber(item.bookmarkCount),
+              caption: getOptionalString(item.caption),
+              commentCount: getOptionalNumber(item.commentCount),
+              coverImageUrl: getOptionalString(item.coverImageUrl),
+              createdAt: getOptionalString(item.createdAt),
+              durationSeconds: getOptionalNumber(item.durationSeconds),
+              hashtags: getOptionalStringArray(item.hashtags),
+              id: getOptionalString(item.id),
+              impressionCount: getOptionalNumber(item.impressionCount),
+              likeCount: getOptionalNumber(item.likeCount),
+              quoteCount: getOptionalNumber(item.quoteCount),
+              replyCount: getOptionalNumber(item.replyCount),
+              repostCount: getOptionalNumber(item.repostCount),
+              shareCount: getOptionalNumber(item.shareCount),
+              shareUrl: getOptionalString(item.shareUrl),
+              text: getOptionalString(item.text),
+              title: getOptionalString(item.title),
+              viewCount: getOptionalNumber(item.viewCount),
             };
 
-            return Object.values(parsedVideo).some((entry) =>
+            return Object.values(parsedItem).some((entry) =>
               Array.isArray(entry) ? entry.length > 0 : entry !== null,
             )
-              ? parsedVideo
+              ? parsedItem
               : null;
           })
-          .filter((video): video is TikTokVideoSnapshot => video !== null)
+          .filter((item): item is TikTokVideoSnapshot => item !== null)
       : [];
+
+  const posts = snapshotValue ? parseContentSnapshots(snapshotValue.posts) : [];
+  const videos = snapshotValue ? parseContentSnapshots(snapshotValue.videos) : [];
 
   const snapshot = snapshotValue
     ? {
         cursor: getOptionalNumber(snapshotValue.cursor),
         hasMore: getOptionalBoolean(snapshotValue.hasMore),
+        posts,
         recentTotals: recentTotalsValue
           ? {
+              bookmarkCount: getOptionalNumber(recentTotalsValue.bookmarkCount),
               commentCount: getOptionalNumber(recentTotalsValue.commentCount),
+              engagementCount: getOptionalNumber(recentTotalsValue.engagementCount),
+              engagementRate: getOptionalNumber(recentTotalsValue.engagementRate),
+              impressionCount: getOptionalNumber(recentTotalsValue.impressionCount),
               likeCount: getOptionalNumber(recentTotalsValue.likeCount),
+              quoteCount: getOptionalNumber(recentTotalsValue.quoteCount),
+              replyCount: getOptionalNumber(recentTotalsValue.replyCount),
+              repostCount: getOptionalNumber(recentTotalsValue.repostCount),
               shareCount: getOptionalNumber(recentTotalsValue.shareCount),
               viewCount: getOptionalNumber(recentTotalsValue.viewCount),
             }
@@ -494,7 +524,7 @@ function formatDateTime(value: string | null | undefined) {
   }).format(timestamp);
 }
 
-function shouldRefreshTikTokSnapshot(connection: ConnectionState) {
+function shouldRefreshProviderSnapshot(connection: ConnectionState) {
   if (connection.status !== "connected") {
     return false;
   }
@@ -742,8 +772,13 @@ export function AcreExperience({
   const [lastTikTokSyncRequestKey, setLastTikTokSyncRequestKey] = useState<string | null>(
     null,
   );
+  const [lastXSyncRequestKey, setLastXSyncRequestKey] = useState<string | null>(null);
   const [tiktokSyncError, setTikTokSyncError] = useState<string | null>(null);
   const [tiktokSyncState, setTikTokSyncState] = useState<
+    "error" | "idle" | "loading" | "success"
+  >("idle");
+  const [xSyncError, setXSyncError] = useState<string | null>(null);
+  const [xSyncState, setXSyncState] = useState<
     "error" | "idle" | "loading" | "success"
   >("idle");
   const [supabase] = useState(() => {
@@ -850,7 +885,7 @@ export function AcreExperience({
   }, [connectionRefreshKey, supabase, viewer?.id]);
 
   useEffect(() => {
-    if (!supabase || !viewer?.id || !shouldRefreshTikTokSnapshot(connections.tiktok)) {
+    if (!supabase || !viewer?.id || !shouldRefreshProviderSnapshot(connections.tiktok)) {
       return;
     }
 
@@ -932,6 +967,93 @@ export function AcreExperience({
     backendBaseUrl,
     connections.tiktok,
     lastTikTokSyncRequestKey,
+    supabase,
+    viewer?.id,
+  ]);
+
+  useEffect(() => {
+    if (!supabase || !viewer?.id || !shouldRefreshProviderSnapshot(connections.x)) {
+      return;
+    }
+
+    const syncKey = `${viewer.id}:${connections.x.connectedAt ?? "connected"}:${
+      connections.x.profile?.snapshot?.syncedAt ?? "unsynced"
+    }`;
+
+    if (lastXSyncRequestKey === syncKey) {
+      return;
+    }
+
+    let cancelled = false;
+    const supabaseClient = supabase;
+
+    async function syncXSnapshot() {
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession();
+
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        return;
+      }
+
+      setLastXSyncRequestKey(syncKey);
+      setXSyncError(null);
+      setXSyncState("loading");
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 25000);
+        const response = await fetch(`${backendBaseUrl}/api/auth/x-me`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: controller.signal,
+        }).finally(() => {
+          window.clearTimeout(timeoutId);
+        });
+        const json: unknown = await response.json().catch(() => ({
+          error: "X sync returned a non-JSON response.",
+        }));
+
+        if (!response.ok) {
+          const message =
+            isRecord(json) && typeof json.error === "string"
+              ? json.error
+              : "Unable to sync X data into Supabase.";
+          throw new Error(message);
+        }
+
+        if (!cancelled) {
+          setXSyncState("success");
+          setConnectionRefreshKey((current) => current + 1);
+        }
+      } catch (error) {
+        console.error("Unable to sync X data", error);
+
+        if (!cancelled) {
+          setXSyncState("error");
+          setXSyncError(
+            error instanceof Error
+              ? error.message
+              : "Unable to sync X data into Supabase.",
+          );
+        }
+      }
+    }
+
+    void syncXSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    backendBaseUrl,
+    connections.x,
+    lastXSyncRequestKey,
     supabase,
     viewer?.id,
   ]);
@@ -1147,8 +1269,11 @@ export function AcreExperience({
     });
     setConnectionRefreshKey(0);
     setLastTikTokSyncRequestKey(null);
+    setLastXSyncRequestKey(null);
     setTikTokSyncError(null);
     setTikTokSyncState("idle");
+    setXSyncError(null);
+    setXSyncState("idle");
     setActiveScreen("dashboard");
     setAuthPending(false);
   }
@@ -1209,9 +1334,22 @@ export function AcreExperience({
   const tiktokSyncWarnings = Array.isArray(tiktokSnapshot?.syncWarnings)
     ? tiktokSnapshot.syncWarnings
     : [];
+  const xProfile = connections.x.profile;
+  const xSnapshot = xProfile?.snapshot;
+  const xPosts = Array.isArray(xSnapshot?.posts) ? xSnapshot.posts : [];
+  const xRecentTotals = xSnapshot?.recentTotals;
+  const xTopHashtags = Array.isArray(xSnapshot?.topHashtags)
+    ? xSnapshot.topHashtags
+    : [];
+  const xSyncWarnings = Array.isArray(xSnapshot?.syncWarnings)
+    ? xSnapshot.syncWarnings
+    : [];
   const hasTikTokConnection = connections.tiktok.status === "connected" && Boolean(tiktokProfile);
+  const hasXConnection = connections.x.status === "connected" && Boolean(xProfile);
   const hasTikTokSnapshot = hasTikTokConnection && Boolean(tiktokSnapshot);
+  const hasXSnapshot = hasXConnection && Boolean(xSnapshot);
   const tiktokHandle = tiktokProfile?.handle ?? tiktokProfile?.username ?? null;
+  const xHandle = xProfile?.handle ?? xProfile?.username ?? null;
   const recentEngagementRate =
     tiktokRecentTotals?.viewCount && tiktokRecentTotals.viewCount > 0
       ? (((tiktokRecentTotals.likeCount ?? 0) +
@@ -1220,8 +1358,22 @@ export function AcreExperience({
           tiktokRecentTotals.viewCount) *
         100
       : null;
-  const dashboardStats = hasTikTokConnection
-    ? [
+  const xEngagementRate =
+    typeof xRecentTotals?.engagementRate === "number"
+      ? xRecentTotals.engagementRate
+      : xRecentTotals?.impressionCount && xRecentTotals.impressionCount > 0
+        ? (((xRecentTotals.likeCount ?? 0) +
+            (xRecentTotals.replyCount ?? 0) +
+            (xRecentTotals.repostCount ?? 0) +
+            (xRecentTotals.quoteCount ?? 0) +
+            (xRecentTotals.bookmarkCount ?? 0)) /
+            xRecentTotals.impressionCount) *
+          100
+        : null;
+  const xEngagementExampleRate = (36 / 900) * 100;
+  const connectedDashboardStats = [
+    ...(hasTikTokConnection
+      ? [
         {
           label: "Follower count",
           note: getMetricNote({
@@ -1267,6 +1419,56 @@ export function AcreExperience({
           value: formatPercentMetric(recentEngagementRate),
         },
       ]
+      : []),
+    ...(hasXConnection
+      ? [
+          {
+            label: "X follower count",
+            note: getMetricNote({
+              available: xHandle
+                ? `X returned public_metrics.followers_count for @${xHandle}.`
+                : "X returned public_metrics.followers_count for this profile.",
+              missing:
+                "X has not returned public_metrics.followers_count for this token yet.",
+              value: xProfile?.followerCount,
+            }),
+            value: formatCompactNumber(xProfile?.followerCount),
+          },
+          {
+            label: "X post count",
+            note: getMetricNote({
+              available: "X returned public_metrics.tweet_count for this profile.",
+              missing: "X has not returned public_metrics.tweet_count yet.",
+              value: xProfile?.videoCount,
+            }),
+            value: formatCompactNumber(xProfile?.videoCount),
+          },
+          {
+            label: "Recent X impressions",
+            note: getMetricNote({
+              available: `${xPosts.length} recent X posts saved into Supabase.`,
+              missing:
+                "X has not returned public_metrics.impression_count for recent posts yet.",
+              value: xRecentTotals?.impressionCount,
+            }),
+            value: formatCompactNumber(xRecentTotals?.impressionCount),
+          },
+          {
+            label: "X engagement rate",
+            note: hasMetricValue(xEngagementRate)
+              ? "Calculated as (likes + replies + reposts + quotes + bookmarks) divided by impressions."
+              : `Example: 36 engagements / 900 impressions = ${formatPercentMetric(
+                  xEngagementExampleRate,
+                )}. Actual rate appears after X returns recent post impressions.`,
+            value: hasMetricValue(xEngagementRate)
+              ? formatPercentMetric(xEngagementRate)
+              : `Example ${formatPercentMetric(xEngagementExampleRate)}`,
+          },
+        ]
+      : []),
+  ];
+  const dashboardStats = connectedDashboardStats.length
+    ? connectedDashboardStats
     : performanceStats;
   const chartVideos = [...tiktokVideos]
     .sort((left, right) => {
@@ -1412,7 +1614,7 @@ export function AcreExperience({
             <h3>Link your publishing channels</h3>
             <p className="section-copy">
               Connect the accounts you want ACRE to track. TikTok and X still run
-              through the hardened backend callback flow, with TikTok snapshots
+              through the hardened backend callback flow, with channel snapshots
               being saved back into Supabase for the dashboard.
             </p>
 
@@ -1575,8 +1777,8 @@ export function AcreExperience({
             <h3>Dashboard</h3>
           </div>
           <p className="section-copy">
-            TikTok profile metrics, recent videos, and parsed hashtags are saved into
-            Supabase and rendered here from that stored snapshot.
+            TikTok and X profile metrics, recent posts, hashtags, and engagement
+            snapshots are saved into Supabase and rendered here from stored data.
           </p>
         </div>
 
@@ -1592,6 +1794,18 @@ export function AcreExperience({
         {tiktokSyncWarnings.length > 0 && (
           <div className="inline-note">{tiktokSyncWarnings.join(" ")}</div>
         )}
+        {xSyncState === "loading" && (
+          <div className="inline-note">
+            Refreshing your X snapshot and saving the latest public metrics into
+            Supabase now.
+          </div>
+        )}
+        {xSyncError && (
+          <div className="inline-note inline-note-error">{xSyncError}</div>
+        )}
+        {xSyncWarnings.length > 0 && (
+          <div className="inline-note">{xSyncWarnings.join(" ")}</div>
+        )}
 
         <div className="stats-grid">
           {dashboardStats.map((stat) => (
@@ -1602,6 +1816,68 @@ export function AcreExperience({
             </article>
           ))}
         </div>
+
+        {hasXConnection && (
+          <div className="acre-panel">
+            <div className="chart-header">
+              <h4>{xHandle ? `X snapshot for @${xHandle}` : "X profile snapshot"}</h4>
+              <span className="status-pill mono">
+                {hasXSnapshot ? "supabase snapshot" : "awaiting X data"}
+              </span>
+            </div>
+            <div className="feed-card">
+              {xPosts.length > 0 ? (
+                xPosts.slice(0, 4).map((post, index) => {
+                  const text = post.text ?? `X post ${index + 1}`;
+                  const engagements =
+                    (post.likeCount ?? 0) +
+                    (post.replyCount ?? 0) +
+                    (post.repostCount ?? 0) +
+                    (post.quoteCount ?? 0) +
+                    (post.bookmarkCount ?? 0);
+                  const postEngagementRate =
+                    post.impressionCount && post.impressionCount > 0
+                      ? (engagements / post.impressionCount) * 100
+                      : null;
+
+                  return (
+                    <div key={post.id ?? `${text}-${index}`} className="feed-row">
+                      <div>
+                        <strong>{text}</strong>
+                        <p>
+                          {formatCompactNumber(post.impressionCount)} impressions
+                          {post.createdAt ? ` â€¢ ${formatDateTime(post.createdAt)}` : ""}
+                        </p>
+                      </div>
+                      <span>
+                        {hasMetricValue(postEngagementRate)
+                          ? formatPercentMetric(postEngagementRate)
+                          : "No rate yet"}
+                      </span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="inline-note">
+                  No recent X posts are available yet. Example engagement rate:
+                  {" "}
+                  {formatPercentMetric(xEngagementExampleRate)}
+                  {" "}
+                  from 36 engagements divided by 900 impressions.
+                </div>
+              )}
+            </div>
+            {xTopHashtags.length > 0 && (
+              <div className="tag-list">
+                {xTopHashtags.map((hashtag) => (
+                  <span key={hashtag} className="tag-pill mono">
+                    {hashtag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="dashboard-grid">
           <div className="acre-panel">
